@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+.env
+*.log
+.DS_Store
+coverage/
+
+# Tauri
+apps/desktop/src-tauri/target/
+apps/desktop/dist/
+
+# Prisma
+apps/api/prisma/*.db
+
+# Backups locais
+backups/
