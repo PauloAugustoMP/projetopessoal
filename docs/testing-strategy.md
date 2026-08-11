@@ -1,89 +1,89 @@
-# Estratégia de testes
+# Testing strategy
 
-## Pirâmide
+## Pyramid
 
 ```
                     ▲
-                   /E2E\          poucos — golden paths no app desktop (Playwright)
+                   /E2E\          few — golden paths in the desktop app (Playwright)
                   /------\
-                 /Integração\     moderados — apps/api contra Postgres real
+                 /Integration\    moderate — backend against a real Postgres
                 /------------\
-               / Contrato/adapter\  poucos — mocks do provedor de cotações
+               / Contract/adapter\  few — quote provider mocks
               /--------------------\
-             /      Unitários        \  muitos — packages/domain, sem I/O
+             /        Unit            \  many — backend/src/backend/domain, no I/O
             /--------------------------\
 ```
 
-Regra geral: se uma regra de negócio pode ser testada sem banco e sem rede, ela **deve** ser testada em `packages/domain`, não reimplicitamente só por um teste de integração. Isso mantém a suíte rápida (roda em segundos, sem Docker) e os testes de integração enxutos (só verificam a fiação, não a lógica em si).
+General rule: if a business rule can be tested without a database and without the network, it **must** be tested in `backend/src/backend/domain`, not implicitly through an integration test alone. This keeps the suite fast (runs in milliseconds, no Docker needed) and the integration tests lean (they only verify the wiring, not the logic itself).
 
-## 1. Testes unitários — `packages/domain`
+## 1. Unit tests — `backend/src/backend/domain`
 
-- **Ferramenta**: Vitest.
-- **Cobertura esperada**: alta (meta ≥ 90% de linhas) — é lógica pura, sem desculpa pra não testar.
-- **O que cobrir**: todo case listado em [business-rules.md](business-rules.md), especialmente os casos de borda já sinalizados no documento (posição zerando, venda maior que posição, todos os ativos acima da meta, LPA/VPA negativos, app fechado por semanas, etc).
-- **Já implementado** (Sprint 0): `average-price-calculator`, `corporate-action-applier`, `rebalance-calculator`, `indicator-calculator`, `snapshot-catchup` — ver `packages/domain/src/services/*.test.ts`.
-- **Convenção**: um arquivo `*.test.ts` ao lado de cada arquivo de serviço. Nome do teste descreve o comportamento em português, não a implementação (`"não altera o preço médio numa venda"`, não `"testa função applySell"`).
-- **Nunca mockar dentro do domínio** — se um teste de domínio "precisa" de um mock, é sinal de que a peça pertence à infraestrutura, não ao domínio.
+- **Tool**: pytest.
+- **Expected coverage**: high (target ≥ 90% of lines) — it's pure logic, no excuse not to test it.
+- **What to cover**: every case listed in [business-rules.md](business-rules.md), especially the edge cases already flagged in the document (position hitting zero, sell larger than the position, every asset already above target, negative EPS/book value, app closed for weeks, etc).
+- **Already implemented** (Sprint 0): `average_price_calculator`, `corporate_action_applier`, `rebalance_calculator`, `indicator_calculator`, `snapshot_catchup` — see `backend/tests/domain/test_*.py` (40 tests, all passing).
+- **Convention**: a `test_*.py` file per module, mirrored under `backend/tests/domain/`. Test names describe the behavior in plain English, not the implementation (`test_does_not_change_the_average_price_on_a_sell`, not `test_apply_sell_function`).
+- **Never mock inside the domain layer** — if a domain test "needs" a mock, that's a sign the piece belongs in infrastructure, not domain.
 
-## 2. Testes de integração — `apps/api`
+## 2. Integration tests — `backend`
 
-- **Ferramenta**: Vitest + `fastify.inject()` (dispensa subir servidor HTTP de verdade) contra um Postgres real rodando em container (mesmo `docker-compose.yml`, banco de teste separado — `investor_test`).
-- **O que cobrir**:
-  - CRUD de transações e o motor de recálculo disparando de ponta a ponta contra o banco (não só a função pura do domínio — aqui importa que a fila/job realmente rode e persista).
-  - Importação de extrato B3: upload → parse → dedup → gravação, com arquivos de exemplo em `apps/api/test/fixtures/`.
-  - Catch-up de snapshot na inicialização: simular `ultimoSnapshotData` no passado, subir o módulo, conferir que os snapshots faltantes foram criados.
-  - Autenticação e autorização (rotas protegidas rejeitando requisição sem token).
-  - Validações de payload (Zod) retornando 400 nos formatos esperados pelo `openapi.yaml`.
-- **Isolamento**: cada arquivo de teste roda dentro de uma transação de banco revertida ao final (ou `TRUNCATE` entre testes) — testes não podem depender de ordem de execução nem deixar sujeira para o próximo.
-- **Sem rede externa**: o provedor de cotações é substituído pelo mock da seção 3 — testes de integração não devem depender do brapi.dev estar no ar.
+- **Tool**: pytest + FastAPI's `TestClient` (or `httpx.AsyncClient` for async routes) against a real Postgres running in a container (the same `docker-compose.yml`, a separate test database — `investor_test`).
+- **What to cover**:
+  - Transaction CRUD and the recalculation engine running end to end against the database (not just the domain's pure function — here what matters is that the background task actually runs and persists).
+  - B3 statement import: upload → parse → dedup → save, with sample files under `backend/tests/fixtures/`.
+  - Startup snapshot catch-up: simulate a past `last_snapshot_date`, start the module, confirm the missing snapshots were created.
+  - Authentication and authorization (protected routes rejecting a request without a token).
+  - Payload validation (Pydantic) returning 400s in the shape expected by `openapi.yaml`.
+- **Isolation**: each test file runs inside a database transaction rolled back at the end (or a `TRUNCATE` between tests) — tests must not depend on execution order or leave state behind for the next one.
+- **No external network**: the quote provider is replaced by the mock from section 3 — integration tests must not depend on brapi.dev being up.
 
-## 3. Testes de contrato / adapter
+## 3. Contract / adapter tests
 
-- **O que é**: testes do adapter `brapi-provider.ts` (e `bcb-provider.ts`) contra respostas **gravadas** (fixtures JSON reais, capturadas uma vez e versionadas), não contra a API ao vivo.
-- **Por quê**: prova que o adapter sabe interpretar o formato de resposta real da API, sem tornar a suíte dependente de rede ou sujeita a rate limit.
-- **O que cobrir**: mapeamento de campos (inclusive `logourl` ausente → fallback tratado em outra camada), erro de rate limit / timeout do provedor sendo propagado como erro de domínio conhecido (não como exceção genérica), série histórica com dias faltantes (feriado/fim de semana).
-- **Atualização das fixtures**: quando a API do provedor mudar o formato, recapturar manualmente e versionar — não automatizar a captura dentro do CI.
+- **What it is**: tests for the `brapi_provider.py` (and `bcb_provider.py`) adapters against **recorded** responses (real JSON fixtures, captured once and checked into the repo), not against the live API.
+- **Why**: proves the adapter correctly parses the provider's real response shape, without making the suite depend on the network or get rate-limited.
+- **What to cover**: field mapping (including a missing `logourl` → the fallback handled in another layer), the provider's rate-limit/timeout errors being surfaced as a known domain error (not a generic exception), a historical price series with missing days (holiday/weekend).
+- **Updating fixtures**: when the provider changes its response shape, recapture manually and check the new fixture in — don't automate the capture as part of CI.
 
-## 4. Testes E2E — app desktop
+## 4. E2E tests — desktop app
 
-- **Ferramenta**: Playwright, apontando pro build web do Tauri (`tauri dev` expõe a webview via WebDriver; alternativamente, roda o mesmo frontend Vite direto num browser para testes mais rápidos, já que a lógica de UI não depende do shell nativo — só funcionalidades específicas do SO, como diálogo de arquivo, exigem o binário Tauri de fato).
-- **Golden paths cobertos** (um teste por fluxo, não por tela):
-  1. Login → dashboard carrega com dados reais.
-  2. Lançar transação (compra) → posição e patrimônio atualizam na tela.
-  3. Lançar transação retroativa → conferir que o dashboard reflete o recálculo (aceitando o estado "recalculando..." antes do resultado final).
-  4. Importar extrato B3 → resumo da importação exibido, posições atualizadas.
-  5. Definir meta de alocação → simular aporte → ver sugestão de compra coerente com a meta.
-  6. Reinvestir saldo de proventos → saldo zera, compras sugeridas aparecem.
-  7. Abrir tooltip de um indicador → texto explicativo visível.
-- **Fora do escopo do E2E**: variações de regra de negócio (isso já está exaustivamente coberto nos testes unitários do domínio) — o E2E só prova que a tela certa mostra o dado certo.
+- **Tool**: Playwright, pointed at the Tauri build's webview (Tauri exposes it via WebDriver for `tauri dev`; alternatively, the same Vite/React frontend can be run directly in a browser for faster tests, since the UI logic doesn't depend on the native shell — only OS-specific features, like the file picker dialog, require the actual Tauri binary).
+- **Golden paths covered** (one test per flow, not per screen):
+  1. Login → dashboard loads with real data.
+  2. Enter a transaction (buy) → position and total value update on screen.
+  3. Enter a backdated transaction → confirm the dashboard reflects the recalculation (tolerating the "recalculating..." state before the final result).
+  4. Import a B3 statement → import summary shown, positions updated.
+  5. Define an allocation target → simulate a contribution → see a suggestion consistent with the target.
+  6. Reinvest the dividend balance → balance resets to zero, suggested purchases appear.
+  7. Open an indicator's tooltip → explanatory text visible.
+- **Out of scope for E2E**: business-rule variations (already exhaustively covered by the domain's unit tests) — E2E only proves the right screen shows the right data.
 
-## 5. Dados de teste
+## 5. Test data
 
-- Factories simples em `packages/domain/test/factories.ts` (reaproveitadas pelos testes de integração) para gerar `Transaction`, `Asset`, `Dividend` etc. com valores padrão sensatos e overrides pontuais — evita testes poluídos com objetos gigantes montados na mão.
-- Fixtures de extrato B3 (`apps/api/test/fixtures/*.csv`) anonimizadas — nunca usar um extrato real seu num arquivo versionado.
+- Simple factories in `backend/tests/factories.py` (reused by integration tests) to build `Transaction`, `Asset`, `Dividend`, etc. with sensible defaults and targeted overrides — avoids tests cluttered with hand-built giant objects.
+- B3 statement fixtures (`backend/tests/fixtures/*.csv`), anonymized — never check in one of your own real statements.
 
-## 6. O que cada sprint entrega em testes
+## 6. What each sprint delivers in tests
 
-Ver [sprints.md](sprints.md) — cada sprint tem sua própria "Definição de pronto" com os testes correspondentes; não existe uma fase separada de "testar tudo no final". A suíte cresce junto com a feature.
+See [sprints.md](sprints.md) — every sprint has its own "Definition of done" with the corresponding tests; there's no separate "test everything at the end" phase. The suite grows together with the feature.
 
-## 7. Rodando a suíte
+## 7. Running the suite
 
 ```bash
-# unitários (rápido, sem Docker)
-npm run test -w packages/domain
+# unit (fast, no Docker needed)
+cd backend && uv run pytest tests/domain
 
-# integração (precisa do docker-compose up com o banco de teste)
-npm run test -w apps/api
+# integration (needs docker-compose up with the test database)
+cd backend && uv run pytest tests/integration
 
-# tudo
-npm test
+# everything in the backend
+cd backend && uv run pytest
 
-# E2E (precisa da API rodando e do app desktop buildado/dev)
-npm run test:e2e -w apps/desktop
+# E2E (needs the API running and the desktop app built/in dev mode)
+cd frontend && npm run test:e2e
 ```
 
-## 8. O que conscientemente não testamos
+## 8. What we deliberately don't test
 
-- Comportamento exato de bibliotecas de terceiros (Fastify, Prisma, Tauri) — confiamos no contrato delas.
-- Precisão de cotação do provedor externo — validamos que *usamos* o dado retornado corretamente, não que o dado em si está certo (isso é responsabilidade do provedor).
-- Carga/performance — fora de escopo para uso single-user.
+- The exact behavior of third-party libraries (FastAPI, SQLAlchemy, Tauri) — we trust their contract.
+- The accuracy of the external provider's quotes — we validate that we *use* the returned data correctly, not that the data itself is correct (that's the provider's responsibility).
+- Load/performance — out of scope for single-user usage.

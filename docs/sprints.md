@@ -1,86 +1,84 @@
-# Plano de sprints
+# Sprint plan
 
-Sequência sugerida respeitando dependências técnicas (ex: não dá pra ter simulador de aporte sem posição calculada; não dá pra ter cotação sem provedor de dados integrado). Sprints de ~1-2 semanas, ritmo solo. "Pronto" em cada sprint sempre inclui os testes correspondentes — não é uma etapa à parte (ver [testing-strategy.md](testing-strategy.md) para a estratégia completa).
+Suggested sequence respecting technical dependencies (e.g. you can't have a contribution simulator without a computed position; you can't have quotes without a data provider integrated). Sprints of ~1-2 weeks, solo pace. "Done" in every sprint always includes the corresponding tests — it's not a separate phase (see [testing-strategy.md](testing-strategy.md) for the full strategy).
 
-## Sprint 0 — Fundação ✅ (feito)
+## Sprint 0 — Foundation ✅ (done)
 
-- Documentação: [architecture.md](architecture.md), [business-rules.md](business-rules.md), [openapi/openapi.yaml](openapi/openapi.yaml)
-- Monorepo (`npm workspaces`), `docker-compose.yml` (Postgres + Redis)
-- `packages/domain`: entidades + regras de negócio puras já implementadas e testadas — preço médio, motor de recálculo (cálculo), eventos corporativos, rebalanceamento/aporte, indicadores (Bazin/Graham/marcadores), catch-up de snapshot na inicialização
+- Documentation: [architecture.md](architecture.md), [business-rules.md](business-rules.md), [openapi/openapi.yaml](openapi/openapi.yaml)
+- `backend/`: uv-managed Python project, FastAPI + pytest
+- `backend/src/backend/domain`: pure business rules already implemented and tested — average price, recalculation engine (calculation), corporate actions, rebalancing/contribution, indicators (Bazin/Graham/markers), startup snapshot catch-up (40 passing tests)
+- `docker-compose.yml` (Postgres + Redis)
 
-**Pendente antes do Sprint 1**: instalar dependências e rodar `npm run test -w packages/domain` pra confirmar que os testes escritos realmente passam.
+## Sprint 1 — Backend core: transactions and position
 
-## Sprint 1 — Backend core: transações e posição
-
-- `apps/api`: Fastify + Prisma, `schema.prisma` com os modelos do domínio
-- Migração inicial do banco
-- Autenticação single-user (senha + JWT, ver business-rules e architecture §5)
+- `backend`: SQLAlchemy models mirroring the domain entities, Alembic migrations
+- Single-user authentication (password + JWT, see business-rules and architecture §5)
 - Endpoints: `POST/GET/PATCH/DELETE /transactions`, `GET /positions`, `GET /assets` (autocomplete)
-- Motor de recálculo (`recalculation-engine`) ligado ao Postgres de verdade — dispara ao criar/editar/remover transação, roda em fila (BullMQ)
-- Validações de sanidade (venda maior que posição, ticker desconhecido)
+- Recalculation engine wired to real Postgres — triggers on transaction create/edit/delete, runs as a background task
+- Sanity checks (sell larger than position, unknown ticker)
 
-**Definição de pronto**: testes de integração dos endpoints com Postgres real; teste de idempotência do motor de recálculo rodando contra o banco; lançar uma transação retroativa manualmente e conferir que a posição recalcula certo.
+**Definition of done**: integration tests for the endpoints against a real Postgres; idempotency test for the recalculation engine running against the database; manually enter a backdated transaction and confirm the position recalculates correctly.
 
-## Sprint 2 — Importação do extrato B3
+## Sprint 2 — B3 statement import
 
-- Parser de CSV/Excel do extrato B3 → transações, proventos (bruto/líquido), eventos corporativos
-- Deduplicação contra transações já existentes
-- Fila de "linhas para revisão manual" quando a correspondência for ambígua
-- Endpoint `POST /import/b3-statement`
+- CSV/Excel parser for the B3 statement → transactions, dividends (gross/net), corporate actions
+- Deduplication against existing transactions
+- "Rows needing manual review" queue when a match is ambiguous
+- `POST /import/b3-statement` endpoint
 
-**Definição de pronto**: testes unitários do parser com arquivos de exemplo reais (anonimizados) cobrindo compra, venda, provento, desdobramento, bonificação, grupamento; teste de deduplicação (mesma linha importada duas vezes não duplica).
+**Definition of done**: unit tests for the parser using sample (anonymized) real files covering buy, sell, dividend, split, bonus shares, reverse split; deduplication test (importing the same line twice doesn't duplicate it).
 
-## Sprint 3 — Cotações, snapshots e catch-up
+## Sprint 3 — Quotes, snapshots, and catch-up
 
-- Adapter do provedor de cotações (brapi.dev) implementando a porta `market-data-provider`
-- `price-poll` job (tempo quase real) + canal WebSocket
-- `daily-snapshot` job (patrimônio total, por categoria, decomposição aporte/valorização/provento)
-- Estado persistido `ultimoSnapshotData` / `ultimaExecucaoEm`
-- Catch-up na inicialização: ao subir a API, compara `ultimoSnapshotData` com hoje e recalcula os dias que ficaram faltando (`computeMissingSnapshotDates`, já implementado no domínio)
-- Redis como cache de cotação (evita estourar rate limit do free tier)
+- Quote provider adapter (brapi.dev) implementing the `market_data_provider` port
+- `price_poll` job (near real-time) + WebSocket channel
+- `daily_snapshot` job (total portfolio value, by category, contribution/appreciation/dividend breakdown)
+- Persisted `last_snapshot_date` / `last_run_at` state
+- Startup catch-up: on API boot, compares `last_snapshot_date` to today and recalculates the days that were missed (`compute_missing_snapshot_dates`, already implemented in the domain layer)
+- Redis as a quote cache (avoids exhausting the free tier's rate limit)
 
-**Definição de pronto**: teste de integração simulando "app ficou desligado 5 dias" e verificando que os 5 snapshots são preenchidos ao subir; mock do provedor de cotações para não depender de rede nos testes; teste do WebSocket entregando atualização de preço a um cliente conectado.
+**Definition of done**: integration test simulating "the app was off for 5 days" and verifying the 5 snapshots get backfilled on startup; quote provider mocked so tests don't depend on the network; WebSocket test delivering a price update to a connected client.
 
-## Sprint 4 — App desktop (Tauri) — base
+## Sprint 4 — Desktop app (Tauri) — foundation
 
-- Scaffold do projeto Tauri + React + Vite (`apps/desktop`)
-- Tela de login
-- Dashboard: patrimônio total, cards de resumo, gráfico de evolução, alocação por categoria, tabela de posições (com logo/avatar por categoria)
-- Client TS gerado a partir do `openapi.yaml`, consumido pela UI
+- Tauri + React + Vite project scaffold (`frontend/`)
+- Login screen
+- Dashboard: total portfolio value, summary cards, growth chart, allocation by category, positions table (with logo/avatar by category)
+- TS client generated from `openapi.yaml`, consumed by the UI
 
-**Definição de pronto**: app abre e mostra dados reais vindos da API local; smoke test manual em cada SO alvo (pelo menos macOS, já que é o ambiente do usuário); teste E2E do fluxo de login.
+**Definition of done**: the app opens and shows real data from the local API; manual smoke test on the target OS (at least macOS, the user's environment); E2E test for the login flow.
 
-## Sprint 5 — Metas de alocação, aporte e reinvestimento
+## Sprint 5 — Allocation targets, contributions, and reinvestment
 
-- Tela de definição de meta (categoria % + peso por ativo, com divisão igual como padrão)
-- Simulador de aporte (`POST /allocation-targets/simulate`) com a tela de sugestão de compra
-- Fluxo "reinvestir dividendos" usando o saldo acumulado de proventos como aporte
+- Screen for defining targets (category % + weight per asset, equal split as the default)
+- Contribution simulator (`POST /allocation-targets/simulate`) with the suggested-purchases screen
+- "Reinvest dividends" flow using the accumulated dividend balance as the contribution amount
 
-**Definição de pronto**: teste E2E do fluxo completo "definir meta → simular aporte → conferir sugestão"; testes de integração validando que a soma dos percentuais de categoria é validada em `PUT /allocation-targets`.
+**Definition of done**: E2E test for the full "define target → simulate contribution → review suggestion" flow; integration tests validating that category percentages are checked in `PUT /allocation-targets`.
 
-## Sprint 6 — Indicadores e proventos
+## Sprint 6 — Indicators and dividends
 
-- `GET /assets/{ticker}/indicators`: P/L, P/VP, DY, ROE com marcador colorido + tooltip
-- Preço teto (Bazin) e preço justo (Graham) na tela de detalhe do ativo
-- Calendário de proventos (data-com / pagamento) + lista de próximos proventos
-- Cadastro manual de provento anunciado
+- `GET /assets/{ticker}/indicators`: P/E, P/B, DY, ROE with a colored marker + tooltip
+- Ceiling price (Bazin) and fair price (Graham) on the asset detail screen
+- Dividend calendar (ex-date / payment date) + upcoming dividends list
+- Manual entry for an announced dividend
 
-**Definição de pronto**: teste E2E abrindo o tooltip de um indicador e conferindo o texto; teste de integração do calendário retornando eventos no intervalo de datas correto.
+**Definition of done**: E2E test opening an indicator's tooltip and checking the text; integration test for the calendar returning events within the correct date range.
 
-## Sprint 7 — Segurança, backup e exportação
+## Sprint 7 — Security, backup, and export
 
-- Backup automático diário do Postgres (`pg_dump` agendado)
-- Exportação livre de dados (CSV/JSON) sob demanda
-- Log de auditoria das alterações retroativas + "desfazer última alteração"
-- Revisão de rate limiting, validação de payload em todas as rotas, capabilities do Tauri restritas ao necessário
+- Automatic daily Postgres backup (scheduled `pg_dump`)
+- Free data export (CSV/JSON) on demand
+- Audit log for backdated changes + "undo last change"
+- Review of rate limiting, payload validation on every route, Tauri capabilities scoped to the minimum needed
 
-**Definição de pronto**: teste automatizado restaurando um backup e conferindo integridade; teste do fluxo de desfazer.
+**Definition of done**: automated test restoring a backup and checking data integrity; test for the undo flow.
 
-## Sprint 8 — Empacotamento e hardening final
+## Sprint 8 — Packaging and final hardening
 
-- Build do instalador Tauri (macOS — ambiente do usuário; Windows/Linux se necessário depois)
-- Configuração do backend pra iniciar junto com o sistema (serviço/daemon)
-- Passada de testes E2E cobrindo os golden paths completos end-to-end
-- Revisão do painel de "última execução dos jobs" (Ajustes) e alertas de falha
+- Tauri installer build (macOS — the user's environment; Windows/Linux later if needed)
+- Backend configured to start with the system (service/daemon)
+- Full pass of E2E tests covering the complete golden paths
+- Review of the "last job run" panel (Settings) and failure alerts
 
-**Definição de pronto**: instalar o `.app` do zero numa máquina limpa e completar o fluxo "abrir app → lançar transação → importar extrato → ver dashboard → simular aporte" sem tocar em código.
+**Definition of done**: install the `.app` from scratch on a clean machine and complete the "open app → enter transaction → import statement → view dashboard → simulate contribution" flow without touching any code.

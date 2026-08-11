@@ -1,51 +1,55 @@
-# Controle de investimentos
+# portfolio-tracker
 
-App pessoal de controle de investimentos (single-user), inspirado no Investidor10. Documentação completa em [`docs/`](docs/architecture.md).
+Personal, single-user investment tracking app, inspired by Investidor10. Full documentation in [`docs/`](docs/architecture.md).
 
-## Estrutura
+## Structure
 
 ```
-apps/
-  api/       # backend Fastify + Prisma (regras de negócio expostas via REST + WebSocket)
-  worker/    # jobs agendados (snapshot diário, polling de cotação)
-  desktop/   # app desktop Tauri + React
-packages/
-  domain/    # entidades e regras de negócio puras (testadas em isolamento)
+backend/     # Python + FastAPI + uv — business logic, REST API, background jobs
+  src/backend/
+    domain/  # pure business rules (average price, rebalancing, indicators, corporate actions...)
+    api/     # FastAPI app and routes
+  tests/
+frontend/    # Tauri + React + Vite — desktop app
 docs/
   architecture.md
   business-rules.md
+  sprints.md
+  testing-strategy.md
   openapi/openapi.yaml
 ```
 
-## Pré-requisitos
+## Prerequisites
 
-- [Node.js](https://nodejs.org) 20+
-- [Docker](https://docker.com) (Postgres + Redis) — necessário para `apps/api`
-- [Rust + Cargo](https://www.rust-lang.org/tools/install) — necessário para compilar `apps/desktop` (Tauri)
-- No Linux, dependências de sistema do Tauri: veja [tauri.app/start/prerequisites](https://tauri.app/start/prerequisites/)
+- [uv](https://docs.astral.sh/uv/) — Python package manager, also installs the right Python version for you
+- [Node.js](https://nodejs.org) 20+ and npm — for the frontend
+- [Docker](https://docker.com) (Postgres + Redis) — required by `backend/`
+- [Rust + Cargo](https://www.rust-lang.org/tools/install) — required to build the desktop app (Tauri)
+- On Linux, Tauri's system dependencies: see [tauri.app/start/prerequisites](https://tauri.app/start/prerequisites/)
 
 ## Setup
 
 ```bash
-npm install
 cp .env.example .env
 docker compose up -d
+
+cd backend && uv sync
 ```
 
-## Testes
+## Tests
 
-O core de regras de negócio (`packages/domain`) tem cobertura de testes unitários e não depende de banco/rede:
+The business-rules core (`backend/src/backend/domain`) has unit test coverage and doesn't depend on a database or network:
 
 ```bash
-npm run test -w packages/domain
+cd backend && uv run pytest
 ```
 
-## Rodando localmente
+## Running locally
 
 ```bash
 # backend
-npm run dev -w apps/api
+cd backend && uv run uvicorn backend.api.app:app --reload
 
-# desktop (precisa de Rust instalado)
-npm run tauri dev -w apps/desktop
+# desktop app (needs Rust installed)
+cd frontend && npm run tauri dev
 ```

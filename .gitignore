@@ -6,12 +6,19 @@ build/
 .DS_Store
 coverage/
 
-# Tauri
-apps/desktop/src-tauri/target/
-apps/desktop/dist/
+# Python (backend)
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
 
-# Prisma
-apps/api/prisma/*.db
+# Tauri (frontend)
+frontend/src-tauri/target/
+frontend/dist/
 
-# Backups locais
+# Local database dumps
+*.db
+
+# Local backups
 backups/

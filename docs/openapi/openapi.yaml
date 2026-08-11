@@ -1,16 +1,16 @@
 openapi: 3.0.3
 info:
-  title: Controle de Investimentos API
+  title: Investment Tracker API
   description: >
-    API do app pessoal de controle de investimentos (single-user, referência de produto: Investidor10).
-    Regras de negócio completas em docs/business-rules.md. Atualização de cotação em tempo (quase) real
-    é entregue por um canal WebSocket separado (`/ws/quotes`), fora do escopo desta especificação REST.
+    API for the personal investment tracking app (single-user, product reference: Investidor10).
+    Full business rules in docs/business-rules.md. Near-real-time quote updates are delivered
+    through a separate WebSocket channel (`/ws/quotes`), outside the scope of this REST spec.
   version: "1.0.0"
 servers:
-  - url: http://localhost:3000/api
+  - url: http://localhost:8000/api
     description: Local (Docker Compose)
   - url: https://portfolio.tailnet.ts.net/api
-    description: Acesso remoto via Tailscale
+    description: Remote access via Tailscale
 
 tags:
   - name: auth
@@ -30,7 +30,7 @@ paths:
   /auth/login:
     post:
       tags: [auth]
-      summary: Autenticar
+      summary: Log in
       security: []
       requestBody:
         required: true
@@ -45,7 +45,7 @@ paths:
                   format: password
       responses:
         "200":
-          description: Autenticado
+          description: Authenticated
           content:
             application/json:
               schema:
@@ -59,7 +59,7 @@ paths:
   /auth/refresh:
     post:
       tags: [auth]
-      summary: Renovar access token
+      summary: Refresh the access token
       security: []
       requestBody:
         required: true
@@ -72,7 +72,7 @@ paths:
                 refreshToken: { type: string }
       responses:
         "200":
-          description: Novo access token
+          description: New access token
           content:
             application/json:
               schema:
@@ -83,16 +83,16 @@ paths:
   /assets:
     get:
       tags: [assets]
-      summary: Buscar ativos (autocomplete de ticker)
+      summary: Search assets (ticker autocomplete)
       parameters:
         - name: q
           in: query
           required: false
           schema: { type: string }
-          description: Filtro por ticker ou nome
+          description: Filter by ticker or name
       responses:
         "200":
-          description: Lista de ativos
+          description: List of assets
           content:
             application/json:
               schema:
@@ -103,12 +103,12 @@ paths:
   /assets/{ticker}:
     get:
       tags: [assets]
-      summary: Detalhe de um ativo
+      summary: Asset detail
       parameters:
         - $ref: "#/components/parameters/TickerParam"
       responses:
         "200":
-          description: Ativo
+          description: Asset
           content:
             application/json:
               schema:
@@ -119,13 +119,13 @@ paths:
   /assets/{ticker}/indicators:
     get:
       tags: [assets]
-      summary: Indicadores fundamentalistas, marcadores e preços-alvo
-      description: Calcula P/L, P/VP, DY, ROE (com cor de marcador) e preço teto (Bazin) / preço justo (Graham).
+      summary: Fundamental indicators, markers, and target prices
+      description: Computes P/E, P/B, DY, ROE (with marker color) and ceiling price (Bazin) / fair price (Graham).
       parameters:
         - $ref: "#/components/parameters/TickerParam"
       responses:
         "200":
-          description: Indicadores do ativo
+          description: Asset indicators
           content:
             application/json:
               schema:
@@ -134,14 +134,14 @@ paths:
   /assets/{ticker}/price-history:
     get:
       tags: [assets]
-      summary: Série histórica de preço
+      summary: Historical price series
       parameters:
         - $ref: "#/components/parameters/TickerParam"
         - $ref: "#/components/parameters/FromParam"
         - $ref: "#/components/parameters/ToParam"
       responses:
         "200":
-          description: Série histórica
+          description: Historical series
           content:
             application/json:
               schema:
@@ -152,7 +152,7 @@ paths:
   /transactions:
     get:
       tags: [transactions]
-      summary: Listar transações
+      summary: List transactions
       parameters:
         - name: ticker
           in: query
@@ -161,7 +161,7 @@ paths:
         - $ref: "#/components/parameters/ToParam"
       responses:
         "200":
-          description: Lista de transações
+          description: List of transactions
           content:
             application/json:
               schema:
@@ -170,10 +170,10 @@ paths:
                   $ref: "#/components/schemas/Transaction"
     post:
       tags: [transactions]
-      summary: Registrar transação (compra ou venda)
+      summary: Record a transaction (buy or sell)
       description: >
-        Lançamentos com data no passado disparam o motor de recálculo (docs/business-rules.md §2)
-        de forma assíncrona. A resposta inclui `recalculating: true` enquanto o processamento roda em background.
+        Entries dated in the past trigger the recalculation engine (docs/business-rules.md §2)
+        asynchronously. The response includes `recalculating: true` while processing runs in the background.
       requestBody:
         required: true
         content:
@@ -182,7 +182,7 @@ paths:
               $ref: "#/components/schemas/TransactionInput"
       responses:
         "201":
-          description: Transação criada
+          description: Transaction created
           content:
             application/json:
               schema:
@@ -190,7 +190,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "422":
-          description: Venda maior que a posição disponível na data
+          description: Sell larger than the position available on that date
           content:
             application/json:
               schema:
@@ -204,10 +204,10 @@ paths:
         schema: { type: string, format: uuid }
     get:
       tags: [transactions]
-      summary: Detalhe de uma transação
+      summary: Transaction detail
       responses:
         "200":
-          description: Transação
+          description: Transaction
           content:
             application/json:
               schema:
@@ -216,7 +216,7 @@ paths:
           $ref: "#/components/responses/NotFound"
     patch:
       tags: [transactions]
-      summary: Editar transação (dispara recálculo)
+      summary: Edit a transaction (triggers recalculation)
       requestBody:
         required: true
         content:
@@ -225,25 +225,25 @@ paths:
               $ref: "#/components/schemas/TransactionInput"
       responses:
         "200":
-          description: Transação atualizada
+          description: Transaction updated
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Transaction"
     delete:
       tags: [transactions]
-      summary: Remover transação (dispara recálculo)
+      summary: Remove a transaction (triggers recalculation)
       responses:
         "204":
-          description: Removida
+          description: Removed
 
   /positions:
     get:
       tags: [positions]
-      summary: Posições atuais da carteira
+      summary: Current portfolio positions
       responses:
         "200":
-          description: Lista de posições
+          description: List of positions
           content:
             application/json:
               schema:
@@ -254,10 +254,10 @@ paths:
   /portfolio/summary:
     get:
       tags: [portfolio]
-      summary: Resumo do patrimônio (usado no dashboard)
+      summary: Portfolio summary (used on the dashboard)
       responses:
         "200":
-          description: Resumo
+          description: Summary
           content:
             application/json:
               schema:
@@ -266,13 +266,13 @@ paths:
   /portfolio/snapshots:
     get:
       tags: [portfolio]
-      summary: Série histórica de patrimônio (gráfico de evolução)
+      summary: Historical portfolio value series (growth chart)
       parameters:
         - $ref: "#/components/parameters/FromParam"
         - $ref: "#/components/parameters/ToParam"
       responses:
         "200":
-          description: Snapshots diários
+          description: Daily snapshots
           content:
             application/json:
               schema:
@@ -283,13 +283,13 @@ paths:
   /portfolio/growth-breakdown:
     get:
       tags: [portfolio]
-      summary: Decomposição do crescimento (aportes vs valorização vs proventos reinvestidos)
+      summary: Growth breakdown (contributions vs. appreciation vs. reinvested dividends)
       parameters:
         - $ref: "#/components/parameters/FromParam"
         - $ref: "#/components/parameters/ToParam"
       responses:
         "200":
-          description: Decomposição do período
+          description: Breakdown for the period
           content:
             application/json:
               schema:
@@ -298,7 +298,7 @@ paths:
   /dividends:
     get:
       tags: [dividends]
-      summary: Proventos (histórico e agenda) — alimenta o calendário
+      summary: Dividends (history and schedule) — feeds the calendar
       parameters:
         - $ref: "#/components/parameters/FromParam"
         - $ref: "#/components/parameters/ToParam"
@@ -306,10 +306,10 @@ paths:
           in: query
           schema:
             type: string
-            enum: [anunciado, pago, pendente_conferencia]
+            enum: [announced, paid, pending_review]
       responses:
         "200":
-          description: Lista de proventos
+          description: List of dividends
           content:
             application/json:
               schema:
@@ -318,7 +318,7 @@ paths:
                   $ref: "#/components/schemas/Dividend"
     post:
       tags: [dividends]
-      summary: Cadastrar provento anunciado manualmente
+      summary: Manually register an announced dividend
       requestBody:
         required: true
         content:
@@ -327,7 +327,7 @@ paths:
               $ref: "#/components/schemas/DividendInput"
       responses:
         "201":
-          description: Provento criado
+          description: Dividend created
           content:
             application/json:
               schema:
@@ -336,25 +336,25 @@ paths:
   /dividends/reinvestment-balance:
     get:
       tags: [dividends]
-      summary: Saldo de proventos disponível para reinvestir
+      summary: Dividend balance available for reinvestment
       responses:
         "200":
-          description: Saldo
+          description: Balance
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  saldoDisponivel: { type: number, format: double }
+                  availableBalance: { type: number, format: double }
 
   /dividends/reinvest:
     post:
       tags: [dividends]
-      summary: Reinvestir saldo de proventos
-      description: Usa o saldo disponível como aporte no simulador de rebalanceamento (docs/business-rules.md §3 e §9).
+      summary: Reinvest the dividend balance
+      description: Uses the available balance as the contribution amount in the rebalancing simulator (docs/business-rules.md §3 and §9).
       responses:
         "200":
-          description: Sugestão de compras geradas a partir do saldo de proventos
+          description: Suggested purchases generated from the dividend balance
           content:
             application/json:
               schema:
@@ -363,17 +363,17 @@ paths:
   /allocation-targets:
     get:
       tags: [allocation]
-      summary: Meta de alocação atual (por categoria e por ativo)
+      summary: Current allocation targets (by category and by asset)
       responses:
         "200":
-          description: Metas
+          description: Targets
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AllocationTargets"
     put:
       tags: [allocation]
-      summary: Definir meta de alocação
+      summary: Set allocation targets
       requestBody:
         required: true
         content:
@@ -382,13 +382,13 @@ paths:
               $ref: "#/components/schemas/AllocationTargets"
       responses:
         "200":
-          description: Metas atualizadas
+          description: Targets updated
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AllocationTargets"
         "400":
-          description: Soma dos percentuais de categoria diferente de 100%
+          description: Category percentages don't add up to 100%
           content:
             application/json:
               schema:
@@ -397,22 +397,22 @@ paths:
   /allocation-targets/simulate:
     post:
       tags: [allocation]
-      summary: Simular aporte segundo a meta de alocação
+      summary: Simulate a contribution according to the allocation targets
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [valorAporte]
+              required: [contributionAmount]
               properties:
-                valorAporte:
+                contributionAmount:
                   type: number
                   format: double
                   example: 5000
       responses:
         "200":
-          description: Sugestão de compras
+          description: Suggested purchases
           content:
             application/json:
               schema:
@@ -421,15 +421,15 @@ paths:
   /corporate-actions:
     get:
       tags: [corporate-actions]
-      summary: Eventos corporativos aplicados (desdobramento, grupamento, bonificação, subscrição)
-      description: Somente leitura — populado automaticamente pela importação do extrato B3.
+      summary: Applied corporate actions (split, reverse split, bonus shares, subscription rights)
+      description: Read-only — populated automatically by the B3 statement import.
       parameters:
         - name: ticker
           in: query
           schema: { type: string }
       responses:
         "200":
-          description: Lista de eventos
+          description: List of events
           content:
             application/json:
               schema:
@@ -440,7 +440,7 @@ paths:
   /import/b3-statement:
     post:
       tags: [import]
-      summary: Importar extrato de movimentação da B3
+      summary: Import a B3 statement of transactions
       requestBody:
         required: true
         content:
@@ -454,13 +454,13 @@ paths:
                   format: binary
       responses:
         "200":
-          description: Resultado da importação
+          description: Import result
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ImportResult"
         "400":
-          description: Arquivo inválido ou formato não reconhecido
+          description: Invalid file or unrecognized format
           content:
             application/json:
               schema:
@@ -491,19 +491,19 @@ components:
 
   responses:
     BadRequest:
-      description: Requisição inválida
+      description: Invalid request
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
     Unauthorized:
-      description: Não autenticado
+      description: Not authenticated
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
     NotFound:
-      description: Recurso não encontrado
+      description: Resource not found
       content:
         application/json:
           schema:
@@ -518,77 +518,77 @@ components:
 
     AssetCategory:
       type: string
-      enum: [acao, fii, renda_fixa, cripto]
+      enum: [stock, reit, fixed_income, crypto]
 
     Asset:
       type: object
       properties:
         ticker: { type: string, example: ITSA4 }
-        nome: { type: string, example: Itaúsa }
-        categoria:
+        name: { type: string, example: Itaúsa }
+        category:
           $ref: "#/components/schemas/AssetCategory"
         logoUrl:
           type: string
           nullable: true
-          description: Vem do provedor de cotações quando disponível; senão a UI usa avatar de iniciais colorido pela categoria.
+          description: Comes from the quote provider when available; otherwise the UI falls back to an initials avatar colored by category.
 
     PricePoint:
       type: object
       properties:
-        data: { type: string, format: date }
-        preco: { type: number, format: double }
+        date: { type: string, format: date }
+        price: { type: number, format: double }
 
     IndicatorMarker:
       type: string
-      enum: [verde, amarelo, vermelho]
+      enum: [green, yellow, red]
 
     Indicator:
       type: object
       properties:
-        nome: { type: string, example: P/VP }
-        valor: { type: number, format: double }
-        marcador:
+        name: { type: string, example: P/B }
+        value: { type: number, format: double }
+        marker:
           $ref: "#/components/schemas/IndicatorMarker"
-        descricao:
+        description:
           type: string
-          description: Texto exibido no tooltip explicativo.
+          description: Text shown in the explanatory tooltip.
 
     AssetIndicators:
       type: object
       properties:
         ticker: { type: string }
-        indicadores:
+        indicators:
           type: array
           items:
             $ref: "#/components/schemas/Indicator"
-        precoTetoBazin:
+        bazinCeilingPrice:
           type: number
           format: double
           nullable: true
-        precoJustoGraham:
+        grahamFairPrice:
           type: number
           format: double
           nullable: true
 
     TransactionType:
       type: string
-      enum: [compra, venda]
+      enum: [buy, sell]
 
     TransactionInput:
       type: object
-      required: [ticker, tipo, quantidade, precoPorCota, data]
+      required: [ticker, type, quantity, pricePerShare, date]
       properties:
         ticker: { type: string, example: ITSA4 }
-        tipo:
+        type:
           $ref: "#/components/schemas/TransactionType"
-        quantidade: { type: number, example: 100 }
-        precoPorCota: { type: number, format: double, example: 9.10 }
-        data: { type: string, format: date }
-        taxas:
+        quantity: { type: number, example: 100 }
+        pricePerShare: { type: number, format: double, example: 9.10 }
+        date: { type: string, format: date }
+        fees:
           type: number
           format: double
           nullable: true
-          description: Opcional — corretagem/emolumentos, usado só para precisão de custo, não obrigatório.
+          description: Optional — brokerage/exchange fees, used only for cost precision, not required.
 
     Transaction:
       allOf:
@@ -596,69 +596,69 @@ components:
         - type: object
           properties:
             id: { type: string, format: uuid }
-            origem:
+            source:
               type: string
-              enum: [manual, importacao_b3]
+              enum: [manual, b3_import]
             recalculating:
               type: boolean
-              description: true enquanto o motor de recálculo ainda está processando esta alteração.
+              description: true while the recalculation engine is still processing this change.
 
     Position:
       type: object
       properties:
         ticker: { type: string }
-        categoria:
+        category:
           $ref: "#/components/schemas/AssetCategory"
-        quantidade: { type: number }
-        precoMedio: { type: number, format: double }
-        precoAtual: { type: number, format: double }
-        rentabilidadePercentual: { type: number, format: double }
-        percentualCarteira: { type: number, format: double }
+        quantity: { type: number }
+        averagePrice: { type: number, format: double }
+        currentPrice: { type: number, format: double }
+        profitPercentage: { type: number, format: double }
+        portfolioPercentage: { type: number, format: double }
 
     PortfolioSummary:
       type: object
       properties:
-        patrimonioTotal: { type: number, format: double }
-        variacaoHojePercentual: { type: number, format: double }
-        rentabilidadeMesPercentual: { type: number, format: double }
-        proventosMes: { type: number, format: double }
-        dyMedio: { type: number, format: double }
-        quantidadeAtivos: { type: integer }
+        totalValue: { type: number, format: double }
+        todayChangePercentage: { type: number, format: double }
+        monthProfitPercentage: { type: number, format: double }
+        monthDividends: { type: number, format: double }
+        averageDy: { type: number, format: double }
+        assetCount: { type: integer }
 
     PortfolioSnapshot:
       type: object
       properties:
-        data: { type: string, format: date }
-        patrimonioTotal: { type: number, format: double }
-        patrimonioPorCategoria:
+        date: { type: string, format: date }
+        totalValue: { type: number, format: double }
+        valueByCategory:
           type: object
           additionalProperties: { type: number, format: double }
-        aportesAcumulados: { type: number, format: double }
-        proventosReinvestidosAcumulados: { type: number, format: double }
+        cumulativeContributions: { type: number, format: double }
+        cumulativeReinvestedDividends: { type: number, format: double }
 
     GrowthBreakdown:
       type: object
-      description: aportes + valorizacao + proventosReinvestidos deve somar variacaoTotal (cálculo por resíduo, docs/business-rules.md §8).
+      description: contributions + appreciation + reinvestedDividends must add up to totalChange (computed by residual, docs/business-rules.md §8).
       properties:
-        variacaoTotal: { type: number, format: double }
-        aportes: { type: number, format: double }
-        valorizacao: { type: number, format: double }
-        proventosReinvestidos: { type: number, format: double }
+        totalChange: { type: number, format: double }
+        contributions: { type: number, format: double }
+        appreciation: { type: number, format: double }
+        reinvestedDividends: { type: number, format: double }
 
     DividendType:
       type: string
-      enum: [dividendo, jcp, rendimento_fii, resgate_renda_fixa]
+      enum: [dividend, jcp, reit_income, fixed_income_redemption]
 
     DividendInput:
       type: object
-      required: [ticker, tipo, valorBrutoPorCota, dataCom, dataPagamento]
+      required: [ticker, type, grossValuePerShare, exDate, paymentDate]
       properties:
         ticker: { type: string }
-        tipo:
+        type:
           $ref: "#/components/schemas/DividendType"
-        valorBrutoPorCota: { type: number, format: double }
-        dataCom: { type: string, format: date }
-        dataPagamento: { type: string, format: date }
+        grossValuePerShare: { type: number, format: double }
+        exDate: { type: string, format: date }
+        paymentDate: { type: string, format: date }
 
     Dividend:
       allOf:
@@ -666,52 +666,52 @@ components:
         - type: object
           properties:
             id: { type: string, format: uuid }
-            percentualIrRetido: { type: number, format: double }
-            valorLiquidoPorCota: { type: number, format: double }
+            withholdingTaxRate: { type: number, format: double }
+            netValuePerShare: { type: number, format: double }
             status:
               type: string
-              enum: [anunciado, pago, pendente_conferencia]
-            reinvestido: { type: boolean }
+              enum: [announced, paid, pending_review]
+            reinvested: { type: boolean }
 
     RebalanceItem:
       type: object
       properties:
         ticker: { type: string }
-        percentualAtual: { type: number, format: double }
-        percentualAlvo: { type: number, format: double }
-        valorSugerido: { type: number, format: double }
-        quantidadeSugerida: { type: integer }
+        currentPercentage: { type: number, format: double }
+        targetPercentage: { type: number, format: double }
+        suggestedValue: { type: number, format: double }
+        suggestedQuantity: { type: integer }
 
     RebalanceSuggestion:
       type: object
       properties:
-        valorAporte: { type: number, format: double }
-        itens:
+        contributionAmount: { type: number, format: double }
+        items:
           type: array
           items:
             $ref: "#/components/schemas/RebalanceItem"
-        valorNaoAlocado:
+        unallocatedValue:
           type: number
           format: double
-          description: Sobra de arredondamento não alocada neste aporte.
+          description: Rounding leftover not allocated in this contribution.
 
     TargetAsset:
       type: object
       properties:
         ticker: { type: string }
-        pesoNaCategoria:
+        weightInCategory:
           type: number
           format: double
           nullable: true
-          description: Nulo = divide igualmente entre os ativos da mesma categoria.
+          description: Null = split equally among the assets in the same category.
 
     AllocationTarget:
       type: object
       properties:
-        categoria:
+        category:
           $ref: "#/components/schemas/AssetCategory"
-        percentual: { type: number, format: double }
-        ativos:
+        percentage: { type: number, format: double }
+        assets:
           type: array
           items:
             $ref: "#/components/schemas/TargetAsset"
@@ -719,39 +719,39 @@ components:
     AllocationTargets:
       type: object
       properties:
-        metas:
+        targets:
           type: array
           items:
             $ref: "#/components/schemas/AllocationTarget"
 
     CorporateActionType:
       type: string
-      enum: [desdobramento, grupamento, bonificacao, subscricao]
+      enum: [split, reverse_split, bonus_shares, subscription_rights]
 
     CorporateAction:
       type: object
       properties:
         id: { type: string, format: uuid }
         ticker: { type: string }
-        tipo:
+        type:
           $ref: "#/components/schemas/CorporateActionType"
-        data: { type: string, format: date }
-        fatorOuPercentual: { type: number, format: double }
-        origem:
+        date: { type: string, format: date }
+        factor: { type: number, format: double }
+        source:
           type: string
-          enum: [importacao_b3]
+          enum: [b3_import]
 
     ImportResult:
       type: object
       properties:
-        transacoesCriadas: { type: integer }
-        proventosCriados: { type: integer }
-        eventosCorporativosCriados: { type: integer }
-        duplicadosIgnorados: { type: integer }
-        linhasParaRevisaoManual:
+        transactionsCreated: { type: integer }
+        dividendsCreated: { type: integer }
+        corporateActionsCreated: { type: integer }
+        duplicatesSkipped: { type: integer }
+        rowsForManualReview:
           type: array
           items:
             type: object
             properties:
-              linha: { type: integer }
-              motivo: { type: string }
+              row: { type: integer }
+              reason: { type: string }

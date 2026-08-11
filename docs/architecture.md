@@ -1,173 +1,179 @@
-# Arquitetura — App de controle de investimentos
+# Architecture — Investment tracking app
 
-Uso pessoal (single-user), local-first, com acesso remoto via VPN pessoal (Tailscale). Referência de produto: Investidor10. Stack em TypeScript ponta a ponta (frontend desktop com um shell nativo em Rust, via Tauri).
+Personal, single-user use, local-first, with optional remote access via a personal VPN (Tailscale). Product reference: Investidor10. Backend in Python (uv + FastAPI); desktop frontend in Tauri (Rust shell) + React.
 
-## 1. Contexto
+## 1. Context
 
 ```
                          ┌────────────────────┐
-                         │        Você          │
+                         │        You            │
                          └──────────┬───────────┘
                                     │
                           ┌─────────▼──────────┐
                           │    Desktop App        │
                           │  (Tauri + React)      │
                           └─────────┬────────────┘
-                                    │  HTTPS/WSS (localhost ou Tailscale
-                                    │  se quiser acessar remoto)
+                                    │  HTTPS/WSS (localhost, or Tailscale
+                                    │  for remote access)
                           ┌─────────▼──────────┐
                           │     API Backend      │
-                          │  (Fastify + TS)      │
+                          │  (FastAPI + Python)  │
                           └─────────┬────────────┘
                                     │
         ┌───────────────┬──────────┼──────────────┬────────────────┐
         │                │                          │                  │
 ┌───────▼──────┐ ┌───────▼───────┐        ┌─────────▼────────┐ ┌───────▼────────┐
 │  PostgreSQL   │ │     Redis      │        │  brapi.dev API    │ │   BCB API       │
-│ (dados próprios)│ │ (cache/fila)  │        │ (cotações, logos, │ │ (CDI/Selic,     │
-│                │ │                │        │  histórico)        │ │  gratuita/oficial)│
+│ (your data)   │ │ (quote cache)  │        │ (quotes, logos,   │ │ (CDI/Selic,     │
+│                │ │                │        │  history)          │ │  free/official) │
 └───────────────┘ └────────────────┘        └───────────────────┘ └─────────────────┘
 
-        Fonte adicional (fora do sistema): extrato de movimentação B3,
-        exportado manualmente pelo usuário e importado via upload de CSV.
+        Additional source (outside the system): B3 statement of transactions,
+        downloaded manually by the user and imported as a file upload.
 ```
 
-Não há integração automática com login da B3 (ver seção 7 — decisão de segurança). O extrato é baixado por você no site da B3 e importado como arquivo.
+There is no automated integration with B3 login (see section 5 — a deliberate security decision). The statement is downloaded by you from the B3 website and imported as a file.
 
 ## 2. Containers
 
-| Container | Responsabilidade | Tecnologia |
+| Container | Responsibility | Technology |
 |---|---|---|
-| Desktop App | Dashboard, carteira, proventos, metas, simulador de aporte — app nativo instalável (macOS/Windows/Linux), só a camada de UI | Tauri 2 (shell Rust) + React + Vite + Tailwind + Recharts |
-| API Backend | Regras de negócio, autenticação, orquestração | Node.js + Fastify + Prisma |
-| Worker | Jobs agendados e assíncronos (ver 4.4) | BullMQ sobre Redis, processo separado do backend |
-| PostgreSQL | Fonte da verdade dos dados do usuário | Postgres 16, rodando em Docker local |
-| Redis | Fila de jobs + cache de cotações (evita estourar rate limit das APIs gratuitas) | Redis 7 |
+| Desktop App | Dashboard, portfolio, dividends, targets, contribution simulator — installable native app (macOS/Windows/Linux), UI layer only | Tauri 2 (Rust shell) + React + Vite + Tailwind + Recharts |
+| API Backend | Business rules, authentication, orchestration, scheduled jobs | Python + FastAPI, managed with uv |
+| PostgreSQL | Source of truth for the user's data | Postgres 16, running in local Docker |
+| Redis | Quote cache (avoids hitting free-tier rate limits on external providers) | Redis 7 |
 
-Todos os containers sobem via **Docker Compose** numa única máquina (seu computador, NAS ou Raspberry Pi). Sem dependência de nuvem pública.
+All containers come up via **Docker Compose** on a single machine (your computer, a NAS, or a Raspberry Pi). No dependency on public cloud.
 
-## 3. Arquitetura interna do backend (hexagonal)
+**Deliberately no separate worker container**: at single-user scale, a second process just adds operational overhead for no real benefit. Scheduled jobs (daily snapshot, quote polling) and background recalculation run **inside the same FastAPI process** via APScheduler and async background tasks. If usage ever outgrows this, splitting out a worker is a contained change — the domain layer doesn't know or care who calls it.
+
+## 3. Backend internal architecture (hexagonal)
 
 ```
-src/
-  domain/               # regras de negócio puras, sem I/O — testadas em isolamento
-    entities/           # Asset, Transaction, Position, Dividend, CorporateAction,
-                         # AllocationTarget, PortfolioSnapshot, Indicator
-    services/
-      average-price-calculator.ts
-      recalculation-engine.ts
-      rebalance-calculator.ts
-      indicator-calculator.ts       # marcadores, preço teto (Bazin), preço justo (Graham)
-      corporate-action-applier.ts
+backend/src/backend/
+  domain/                # pure business rules, no I/O — tested in isolation
+    entities.py          # Asset, Transaction, Position, Dividend, CorporateAction,
+                          # AllocationTarget, PortfolioSnapshot, Indicator
+    average_price_calculator.py
+    corporate_action_applier.py
+    rebalance_calculator.py
+    indicator_calculator.py    # markers, ceiling price (Bazin), fair price (Graham)
+    snapshot_catchup.py
 
-  application/           # casos de uso — orquestram domínio + portas
-    use-cases/
-      record-transaction.ts
-      import-b3-statement.ts
-      simulate-contribution.ts
-      reinvest-dividends.ts
-      get-portfolio-growth.ts
+  application/            # use cases — orchestrate domain + ports
+    record_transaction.py
+    import_b3_statement.py
+    simulate_contribution.py
+    reinvest_dividends.py
+    get_portfolio_growth.py
 
-  ports/                 # interfaces que a infraestrutura implementa
-    market-data-provider.port.ts
-    transaction-repository.port.ts
-    price-history-repository.port.ts
-    job-scheduler.port.ts
+  ports/                  # interfaces that infrastructure implements
+    market_data_provider.py
+    transaction_repository.py
+    price_history_repository.py
 
   infrastructure/
-    persistence/         # implementações Prisma dos repositórios
-    market-data/
-      brapi-provider.ts          # implementa market-data-provider.port
-      bcb-provider.ts            # CDI/Selic
-    b3-import/
-      statement-csv-parser.ts    # extrai transações + eventos corporativos + proventos
+    persistence/          # SQLAlchemy repository implementations
+    market_data/
+      brapi_provider.py         # implements market_data_provider port
+      bcb_provider.py           # CDI/Selic
+    b3_import/
+      statement_csv_parser.py   # extracts transactions + corporate actions + dividends
     jobs/
-      daily-snapshot.job.ts
-      price-poll.job.ts          # polling de cotação em pregão, broadcast via WS
-    http/
-      rest/                      # controllers, gerados a partir do OpenAPI
-      websocket/                 # canal de cotação em tempo (quase) real
+      daily_snapshot.py
+      price_poll.py             # quote polling during market hours, broadcast via WS
+
+  api/
+    app.py                 # FastAPI app instance
+    routes/                 # routers, mirroring openapi.yaml
+    websocket.py             # near-real-time quote channel
 ```
 
-Regra de dependência: `domain` não conhece `infrastructure`. Isso é o que permite trocar o provedor de cotações (ex: sair do free tier pra um pago no futuro) sem tocar em nenhuma regra de negócio, e testar `domain`/`application` inteiramente com mocks das portas — sem banco, sem rede.
+Dependency rule: `domain` doesn't know about `infrastructure`. That's what allows swapping the quote provider (e.g. moving from the free tier to a paid one later) without touching any business rule, and testing `domain`/`application` entirely with fakes for the ports — no database, no network.
 
-## 4. Fluxos principais
+## 4. Main flows
 
-### 4.1 Cotação "tempo real"
-1. `price-poll.job` roda a cada 15–30s em horário de pregão (B3: 10h–17h, horário de Brasília), busca cotação dos ativos que você possui via `market-data-provider`.
-2. Preço é cacheado no Redis (evita re-consultar a API externa se múltiplos clientes estiverem conectados).
-3. Backend propaga a atualização via WebSocket pro app desktop conectado.
-4. Fora do pregão, o job roda em intervalo bem mais espaçado (ou não roda), já que preço não muda.
+### 4.1 "Real-time" quotes
+1. The `price_poll` job runs every 15–30s during market hours (B3: 10am–5pm, Brasília time), fetching quotes for the assets you hold through `market_data_provider`.
+2. The price is cached in Redis (avoids re-querying the external API if multiple clients are connected).
+3. The backend pushes the update to the connected desktop app over WebSocket.
+4. Outside market hours, the job runs at a much longer interval (or not at all), since the price doesn't change.
 
-### 4.2 Lançamento retroativo + recálculo
-1. `record-transaction` grava a transação no ledger imutável.
-2. Dispara `recalculation-engine` como job assíncrono (não bloqueia a resposta da API).
-3. O motor recalcula, em ordem cronológica: posição/preço médio do ativo → snapshots diários de patrimônio no intervalo afetado (busca preço histórico via `market-data-provider` se ainda não estiver em cache) → elegibilidade a proventos no intervalo.
-4. Enquanto processa, a API expõe um status (`recalculating: true`) pra UI mostrar feedback.
-5. Execução é idempotente: rodar o mesmo recálculo duas vezes produz o mesmo estado final — propriedade validada por teste automatizado.
+### 4.2 Backdated entry + recalculation
+1. `record_transaction` writes the transaction to the immutable ledger.
+2. It schedules the `recalculation engine` as a background task (does not block the API response).
+3. The engine recalculates, in chronological order: the asset's position/average price → the daily portfolio snapshots in the affected range (fetching historical prices via `market_data_provider` if not already cached) → dividend eligibility in that range.
+4. While it runs, the API exposes a status (`recalculating: true`) for the UI to show feedback.
+5. Execution is idempotent: running the same recalculation twice produces the same final state — a property verified by an automated test.
 
-### 4.3 Importação de extrato B3
-1. Upload do CSV/Excel exportado da área do investidor B3.
-2. Parser classifica cada linha: compra/venda, provento (com bruto/líquido), ou evento corporativo (desdobramento/grupamento/bonificação/subscrição).
-3. Deduplicação: compara ticker + data + quantidade + preço contra o que já existe antes de gravar, pra não duplicar o que você já lançou manualmente.
-4. Eventos gravados disparam o mesmo motor de recálculo do item 4.2.
+### 4.3 B3 statement import
+1. Upload of the CSV/Excel file exported from the B3 investor portal.
+2. The parser classifies each line: buy/sell, dividend (gross/net), or corporate action (split/reverse split/bonus shares/subscription rights).
+3. Deduplication: compares ticker + date + quantity + price against what already exists before saving, so it doesn't duplicate what you already entered manually.
+4. Newly saved records trigger the same recalculation engine from 4.2.
 
-### 4.4 Catch-up ao iniciar
+### 4.4 Catch-up on startup
 
-Como o backend não roda 24/7 (o computador é desligado, o app é fechado), o `daily-snapshot` pode perder dias. Uma tabela `SystemState` (chave/valor) guarda `ultimoSnapshotData` e `ultimaExecucaoEm`. Ao subir a API:
-1. Compara `ultimoSnapshotData` com a data de hoje.
-2. `computeMissingSnapshotDates` (packages/domain) calcula os dias faltantes.
-3. O mesmo motor de recálculo da seção 4.2 processa cada dia faltante, em ordem, atualizando `ultimoSnapshotData` incrementalmente — se cair no meio, a próxima subida retoma do ponto certo.
+Since the backend doesn't run 24/7 (the computer gets turned off, the app gets closed), `daily_snapshot` can miss days. A `SystemState` key-value table stores `last_snapshot_date` and `last_run_at`. On API startup:
+1. Compares `last_snapshot_date` to today's date.
+2. `compute_missing_snapshot_dates` (backend/src/backend/domain) computes the missing days.
+3. The same recalculation engine from section 4.2 processes each missing day, in order, updating `last_snapshot_date` incrementally — if interrupted midway, the next startup resumes from the right point.
 
-Detalhe completo em [business-rules.md §8.1](business-rules.md#81-catch-up-ao-iniciar-o-app).
+Full detail in [business-rules.md §8.1](business-rules.md#81-catch-up-on-startup).
 
-### 4.5 Jobs agendados (worker)
-- `daily-snapshot`: roda após fechamento do pregão, grava `PortfolioSnapshot` do dia (total, por categoria, decomposição aporte/valorização/provento reinvestido).
-- `price-poll`: descrito em 4.1.
-- Alertas de falha: como não há equipe de oncall, falha de job grava log estruturado e also gera notificação simples (ex: e-mail ou push) pra você saber que um recálculo não completou — importante pra confiança nos números.
+### 4.5 Scheduled jobs
+- `daily_snapshot`: runs after market close, records the day's `PortfolioSnapshot` (total, by category, contribution/appreciation/reinvested-dividend breakdown).
+- `price_poll`: described in 4.1.
+- Failure alerts: since there's no on-call team, a failed job writes a structured log and also raises a simple notification (e.g. email or push) so you know a recalculation didn't complete — important for trusting the numbers.
 
-## 5. Segurança
+## 5. Security
 
-- Autenticação single-user: usuário + senha (argon2), sessão via JWT de vida curta + refresh token.
-- Sem integração de login com a B3 (decisão deliberada — ver conversa: não guardar credenciais de terceiros).
-- Segredos (API keys) em variáveis de ambiente, nunca no repositório.
-- HTTPS mesmo local, via certificado do próprio Tailscale (que já provê TLS ponta a ponta) ou mkcert para uso puramente LAN.
-- Rate limiting nas rotas da API; validação de payload em toda rota (zod, compartilhado com os schemas do OpenAPI).
-- Backup automático diário do Postgres (`pg_dump`) + exportação livre de dados sob demanda (CSV/JSON) pelo usuário.
-- **Tauri**: o app desktop declara explicitamente, em `tauri.conf.json`, quais capabilities tem acesso (rede só pro host da API configurado, sistema de arquivos só pra diálogo de importar CSV/exportar backup). Diferente de Electron, não há Node.js exposto ao frontend — a superfície de ataque do processo desktop fica bem menor.
+- Single-user authentication: username + password (argon2), session via short-lived JWT + refresh token.
+- No B3 login integration (a deliberate decision — never store third-party credentials).
+- Secrets (API keys) in environment variables, never in the repository.
+- HTTPS even locally, via Tailscale's own certificate (which already provides end-to-end TLS) or mkcert for LAN-only use.
+- Rate limiting on API routes; payload validation on every route (Pydantic models, shared with the OpenAPI schemas).
+- Automatic daily Postgres backup (`pg_dump`) + free data export on demand (CSV/JSON) by the user.
+- **Tauri**: the desktop app explicitly declares, in `tauri.conf.json`, which capabilities it has access to (network only to the configured API host, filesystem only for the CSV import / backup export dialogs). Unlike Electron, there's no Node.js exposed to the frontend — the desktop process's attack surface is much smaller.
 
-## 6. Observabilidade
+## 6. Observability
 
-- Logs estruturados (pino) no backend e worker.
-- Correlação por `requestId` entre API e jobs assíncronos disparados por ela.
-- Painel simples de "última execução dos jobs" (daily-snapshot, price-poll) na própria UI, em Ajustes — visibilidade mínima sem precisar de Grafana/Datadog para um projeto pessoal.
+- Structured logs (structlog) in the backend.
+- Correlation via `request_id` between API requests and the background tasks they trigger.
+- A simple "last job run" panel (daily_snapshot, price_poll) in the app itself, under Settings — minimal visibility without needing Grafana/Datadog for a personal project.
 
-## 7. Deploy
+## 7. Deployment
 
-- `docker-compose.yml` na raiz do repo sobe: `api`, `worker`, `postgres`, `redis`. Configurado para iniciar junto com o sistema (serviço/daemon do SO), já que o app desktop depende dele estar no ar.
-- O app desktop aponta pra URL local (`localhost`) por padrão, ou pro hostname do Tailscale se você quiser abrir o app noutra máquina apontando pro mesmo backend — configurável nas Ajustes do app.
-- Sem exposição de porta pública na internet.
+- `docker-compose.yml` at the repo root brings up `api`, `postgres`, `redis`. Configured to start with the system (OS service/daemon), since the desktop app depends on it being up.
+- The desktop app points to the local URL (`localhost`) by default, or to the Tailscale hostname if you want to open the app on another machine pointing at the same backend — configurable in the app's Settings.
+- No public port exposed to the internet.
 
-## 8. Estrutura do monorepo
+## 8. Repository structure
 
 ```
 /
-  apps/
-    api/            # backend Fastify
-    worker/         # jobs assíncronos
-    desktop/        # app Tauri
-      src/          # frontend React + Vite
-      src-tauri/    # shell nativo Rust (config de capabilities, build por SO)
-  packages/
-    domain/         # entidades e regras de negócio compartilhadas (usado por api e worker)
-    api-client/     # client TS gerado a partir do openapi.yaml, usado pelo desktop
-    config/         # eslint/tsconfig compartilhados
+  backend/
+    pyproject.toml     # uv-managed
+    src/backend/
+      domain/
+      application/
+      ports/
+      infrastructure/
+      api/
+    tests/
+      domain/
+  frontend/
+    package.json
+    src/                # React + Vite
+    src-tauri/          # native Rust shell (capabilities config, per-OS build)
   docs/
     architecture.md
     business-rules.md
+    sprints.md
+    testing-strategy.md
     openapi/
       openapi.yaml
   docker-compose.yml
 ```
 
-Gerenciado com pnpm workspaces + Turborepo (build incremental, cache local).
+Backend and frontend are independent projects with their own package managers (`uv` for Python, `npm` for the frontend) — they only communicate over HTTP/WebSocket, so there's no reason to force them into a single-language monorepo.
