@@ -1,7 +1,7 @@
 from fastapi import APIRouter, FastAPI
 
 from backend.api.errors import register_error_handlers
-from backend.api.routes import assets, auth, positions, transactions
+from backend.api.routes import assets, auth, corporate_actions, imports, positions, transactions
 
 app = FastAPI(
     title="Investment Tracker API",
@@ -16,6 +16,8 @@ api.include_router(auth.router)
 api.include_router(assets.router)
 api.include_router(transactions.router)
 api.include_router(positions.router)
+api.include_router(imports.router)
+api.include_router(corporate_actions.router)
 
 
 @api.get("/health")

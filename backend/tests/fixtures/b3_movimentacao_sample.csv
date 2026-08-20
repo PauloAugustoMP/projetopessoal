@@ -1,0 +1,12 @@
+Entrada/Saída;Data;Movimentação;Produto;Instituição;Quantidade;Preço unitário;Valor da Operação
+Credito;10/01/2026;Transferência - Liquidação;ITSA4 - ITAUSA S.A.;CORRETORA XYZ;100;R$ 9,10;R$ 910,00
+Debito;20/01/2026;Transferência - Liquidação;ITSA4 - ITAUSA S.A.;CORRETORA XYZ;40;R$ 10,00;R$ 400,00
+Credito;05/02/2026;Dividendo;ITSA4 - ITAUSA S.A.;CORRETORA XYZ;60;R$ 0,25;R$ 15,00
+Credito;05/02/2026;Juros Sobre Capital Próprio;ITSA4 - ITAUSA S.A.;CORRETORA XYZ;60;R$ 0,10;R$ 6,00
+Credito;10/02/2026;Transferência - Liquidação;MXRF11 - MAXI RENDA FDO INV IMOB;CORRETORA XYZ;50;R$ 10,00;R$ 500,00
+Credito;15/02/2026;Rendimento;MXRF11 - MAXI RENDA FDO INV IMOB;CORRETORA XYZ;50;R$ 0,10;R$ 5,00
+Credito;01/03/2026;Desdobro;ITSA4 - ITAUSA S.A.;CORRETORA XYZ;60;-;-
+Credito;10/03/2026;Bonificação em Ativos;ITSA4 - ITAUSA S.A.;CORRETORA XYZ;12;-;-
+Debito;20/03/2026;Grupamento;MXRF11 - MAXI RENDA FDO INV IMOB;CORRETORA XYZ;45;-;-
+Credito;25/03/2026;Atualização;ITSA4 - ITAUSA S.A.;CORRETORA XYZ;132;-;-
+Credito;26/03/2026;Movimento Desconhecido;ITSA4 - ITAUSA S.A.;CORRETORA XYZ;1;-;-

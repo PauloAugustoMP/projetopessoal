@@ -8,14 +8,15 @@ from backend.api.dependencies import SessionDep, require_auth
 from backend.api.errors import ApiError
 from backend.api.schemas import TransactionInput, TransactionResponse
 from backend.application.recalculation import is_recalculating, recalculate_position
-from backend.domain.average_price_calculator import (
-    InsufficientPositionError,
-    calculate_position_and_realized_sales,
-)
+from backend.domain.average_price_calculator import InsufficientPositionError
 from backend.domain.entities import Transaction
+from backend.domain.position_history import replay_history
 from backend.infrastructure.persistence.database import get_session_factory
 from backend.infrastructure.persistence.models import AssetModel, TransactionModel
-from backend.infrastructure.persistence.repositories import to_domain_transaction
+from backend.infrastructure.persistence.repositories import (
+    SqlAlchemyCorporateActionRepository,
+    to_domain_transaction,
+)
 
 router = APIRouter(
     prefix="/transactions", tags=["transactions"], dependencies=[Depends(require_auth)]
@@ -46,11 +47,13 @@ def _require_known_ticker(session: SessionDep, ticker: str) -> None:
         )
 
 
-def _validate_history(ticker: str, transactions: list[Transaction]) -> None:
-    """Sanity check: replaying the prospective history must never sell more than
-    the position available on that date (docs/business-rules.md §10)."""
+def _validate_history(session: SessionDep, ticker: str, transactions: list[Transaction]) -> None:
+    """Sanity check: replaying the prospective history (corporate actions included)
+    must never sell more than the position available on that date
+    (docs/business-rules.md §10)."""
+    corporate_actions = SqlAlchemyCorporateActionRepository(session).list_by_ticker(ticker)
     try:
-        calculate_position_and_realized_sales(ticker, transactions)
+        replay_history(ticker, transactions, corporate_actions)
     except InsufficientPositionError as error:
         raise ApiError(422, "SELL_EXCEEDS_POSITION", str(error)) from error
 
@@ -132,7 +135,7 @@ def create_transaction(
             fees=body.fees or 0.0,
         )
     )
-    _validate_history(ticker, candidate)
+    _validate_history(session, ticker, candidate)
 
     session.add(model)
     session.commit()
@@ -169,10 +172,10 @@ def update_transaction(
     )
     new_history = _existing_domain_transactions(session, new_ticker, exclude_id=model.id)
     new_history.append(updated)
-    _validate_history(new_ticker, new_history)
+    _validate_history(session, new_ticker, new_history)
     if old_ticker != new_ticker:
         _validate_history(
-            old_ticker, _existing_domain_transactions(session, old_ticker, exclude_id=model.id)
+            session, old_ticker, _existing_domain_transactions(session, old_ticker, exclude_id=model.id)
         )
 
     model.ticker = new_ticker
@@ -193,7 +196,7 @@ def delete_transaction(
     model = _get_or_404(session, transaction_id)
     ticker = model.ticker
     _validate_history(
-        ticker, _existing_domain_transactions(session, ticker, exclude_id=model.id)
+        session, ticker, _existing_domain_transactions(session, ticker, exclude_id=model.id)
     )
     session.delete(model)
     session.commit()

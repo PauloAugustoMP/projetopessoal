@@ -59,6 +59,9 @@ backend/src/backend/
     rebalance_calculator.py
     indicator_calculator.py    # markers, ceiling price (Bazin), fair price (Graham)
     snapshot_catchup.py
+    position_history.py        # replays transactions + corporate actions chronologically
+    statement_dedup.py         # import deduplication rule (business-rules §7)
+    dividend_withholding.py    # withholding at the source per dividend type (§6)
 
   application/            # use cases — orchestrate domain + ports
     record_transaction.py
@@ -78,7 +81,7 @@ backend/src/backend/
       brapi_provider.py         # implements market_data_provider port
       bcb_provider.py           # CDI/Selic
     b3_import/
-      statement_csv_parser.py   # extracts transactions + corporate actions + dividends
+      statement_parser.py       # CSV/Excel — extracts transactions + corporate actions + dividends
     jobs/
       daily_snapshot.py
       price_poll.py             # quote polling during market hours, broadcast via WS

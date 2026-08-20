@@ -1,9 +1,19 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.domain.entities import Transaction
+from backend.domain.entities import CorporateAction, Transaction
 
-from .models import PositionModel, TransactionModel
+from .models import CorporateActionModel, PositionModel, TransactionModel
+
+
+def to_domain_corporate_action(model: CorporateActionModel) -> CorporateAction:
+    return CorporateAction(
+        id=str(model.id),
+        ticker=model.ticker,
+        type=model.type,  # type: ignore[arg-type]
+        date=model.date.isoformat(),
+        factor=float(model.factor),
+    )
 
 
 def to_domain_transaction(model: TransactionModel) -> Transaction:
@@ -27,6 +37,17 @@ class SqlAlchemyTransactionRepository:
             select(TransactionModel).where(TransactionModel.ticker == ticker)
         ).all()
         return [to_domain_transaction(row) for row in rows]
+
+
+class SqlAlchemyCorporateActionRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def list_by_ticker(self, ticker: str) -> list[CorporateAction]:
+        rows = self._session.scalars(
+            select(CorporateActionModel).where(CorporateActionModel.ticker == ticker)
+        ).all()
+        return [to_domain_corporate_action(row) for row in rows]
 
 
 class SqlAlchemyPositionRepository:

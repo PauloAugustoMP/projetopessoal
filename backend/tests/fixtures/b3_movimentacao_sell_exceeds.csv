@@ -1,0 +1,3 @@
+Entrada/Saída;Data;Movimentação;Produto;Instituição;Quantidade;Preço unitário;Valor da Operação
+Credito;10/01/2026;Transferência - Liquidação;PETR4 - PETROBRAS PN;CORRETORA XYZ;100;R$ 40,00;R$ 4.000,00
+Debito;20/01/2026;Transferência - Liquidação;PETR4 - PETROBRAS PN;CORRETORA XYZ;150;R$ 42,00;R$ 6.300,00

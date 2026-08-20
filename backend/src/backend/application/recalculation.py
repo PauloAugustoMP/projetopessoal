@@ -15,8 +15,9 @@ import threading
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from backend.domain.average_price_calculator import calculate_position_and_realized_sales
+from backend.domain.position_history import replay_history
 from backend.infrastructure.persistence.repositories import (
+    SqlAlchemyCorporateActionRepository,
     SqlAlchemyPositionRepository,
     SqlAlchemyTransactionRepository,
 )
@@ -39,11 +40,12 @@ def recalculate_position(session_factory: sessionmaker[Session], ticker: str) ->
         session = session_factory()
         try:
             transactions = SqlAlchemyTransactionRepository(session).list_by_ticker(ticker)
+            corporate_actions = SqlAlchemyCorporateActionRepository(session).list_by_ticker(ticker)
             positions = SqlAlchemyPositionRepository(session)
             if not transactions:
                 positions.delete(ticker)
             else:
-                result = calculate_position_and_realized_sales(ticker, transactions)
+                result = replay_history(ticker, transactions, corporate_actions)
                 positions.upsert(
                     ticker,
                     quantity=result.position.quantity,

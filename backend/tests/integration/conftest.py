@@ -50,7 +50,11 @@ def migrated_database():
 def clean_tables(migrated_database):
     yield
     with get_engine().begin() as connection:
-        connection.execute(text("TRUNCATE transactions, positions"))
+        connection.execute(
+            text(
+                "TRUNCATE transactions, positions, dividends, corporate_actions, import_review_rows"
+            )
+        )
 
 
 @pytest.fixture

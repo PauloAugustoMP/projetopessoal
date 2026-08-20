@@ -58,6 +58,28 @@ class TransactionResponse(ApiModel):
     recalculating: bool
 
 
+class ReviewRowResponse(ApiModel):
+    row: int
+    reason: str
+
+
+class ImportResultResponse(ApiModel):
+    transactions_created: int
+    dividends_created: int
+    corporate_actions_created: int
+    duplicates_skipped: int
+    rows_for_manual_review: list[ReviewRowResponse]
+
+
+class CorporateActionResponse(ApiModel):
+    id: str
+    ticker: str
+    type: Literal["split", "reverse_split", "bonus_shares", "subscription_rights"]
+    date: date
+    factor: float
+    source: Literal["manual", "b3_import"]
+
+
 class PositionResponse(ApiModel):
     ticker: str
     category: Literal["stock", "reit", "fixed_income", "crypto"]

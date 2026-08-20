@@ -19,14 +19,15 @@ Suggested sequence respecting technical dependencies (e.g. you can't have a cont
 
 **Definition of done**: ✅ integration tests for the endpoints against a real Postgres (`backend/tests/integration/`, 26 tests); idempotency test for the recalculation engine running against the database; backdated-transaction test + manual smoke test confirming the position recalculates correctly.
 
-## Sprint 2 — B3 statement import
+## Sprint 2 — B3 statement import ✅ (done)
 
-- CSV/Excel parser for the B3 statement → transactions, dividends (gross/net), corporate actions
-- Deduplication against existing transactions
-- "Rows needing manual review" queue when a match is ambiguous
-- `POST /import/b3-statement` endpoint
+- CSV/Excel parser for the B3 movement statement (`infrastructure/b3_import/statement_parser.py`) → transactions, dividends (gross/net via `domain/dividend_withholding.py`), corporate actions (factor derived from the position held on the event date)
+- Deduplication against existing transactions (`domain/statement_dedup.py`: ticker + date + quantity + price within a cent; ambiguous → review)
+- "Rows needing manual review" queue persisted in `import_review_rows` and returned in the response (unknown movement types, unknown tickers, underivable factors, post-import inconsistencies)
+- `POST /import/b3-statement` endpoint + read-only `GET /corporate-actions`
+- Recalculation engine (and the sell sanity check) now replays corporate actions interleaved with transactions (`domain/position_history.py`); batch imports flag a sell-exceeds-position for review instead of rejecting (business-rules §10)
 
-**Definition of done**: unit tests for the parser using sample (anonymized) real files covering buy, sell, dividend, split, bonus shares, reverse split; deduplication test (importing the same line twice doesn't duplicate it).
+**Definition of done**: ✅ parser unit tests with anonymized sample files (`backend/tests/fixtures/`) covering buy, sell, dividend/JCP/REIT income, split, bonus shares, reverse split, CSV and Excel; deduplication tests (re-importing the same file creates nothing new; a manual entry blocks its imported twin). 93 tests passing.
 
 ## Sprint 3 — Quotes, snapshots, and catch-up
 
