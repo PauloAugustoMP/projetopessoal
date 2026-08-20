@@ -5,7 +5,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Reads the repo-root .env whether the server is started from the repo root
+    # or from backend/ (later entries win).
+    model_config = SettingsConfigDict(env_file=("../.env", ".env"), extra="ignore")
 
     database_url: str = "postgresql+psycopg://investor:investor@localhost:5432/investor"
 
