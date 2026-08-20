@@ -34,14 +34,17 @@ cp .env.example .env
 docker compose up -d
 
 cd backend && uv sync
+uv run alembic upgrade head                  # apply database migrations
+uv run python -m backend.cli hash-password   # generate APP_PASSWORD_HASH for .env
 ```
 
 ## Tests
 
-The business-rules core (`backend/src/backend/domain`) has unit test coverage and doesn't depend on a database or network:
+Unit tests (`backend/tests/domain`) are pure and need no database; integration tests (`backend/tests/integration`) need Postgres up (they use `TEST_DATABASE_URL`, defaulting to an `investor_test` database on the docker-compose instance — create it once with `docker compose exec postgres createdb -U investor investor_test`):
 
 ```bash
-cd backend && uv run pytest
+cd backend && uv run pytest tests/domain   # fast, no Docker
+cd backend && uv run pytest                # everything
 ```
 
 ## Running locally

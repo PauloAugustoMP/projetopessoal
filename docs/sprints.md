@@ -9,15 +9,15 @@ Suggested sequence respecting technical dependencies (e.g. you can't have a cont
 - `backend/src/backend/domain`: pure business rules already implemented and tested — average price, recalculation engine (calculation), corporate actions, rebalancing/contribution, indicators (Bazin/Graham/markers), startup snapshot catch-up (40 passing tests)
 - `docker-compose.yml` (Postgres + Redis)
 
-## Sprint 1 — Backend core: transactions and position
+## Sprint 1 — Backend core: transactions and position ✅ (done)
 
-- `backend`: SQLAlchemy models mirroring the domain entities, Alembic migrations
-- Single-user authentication (password + JWT, see business-rules and architecture §5)
-- Endpoints: `POST/GET/PATCH/DELETE /transactions`, `GET /positions`, `GET /assets` (autocomplete)
-- Recalculation engine wired to real Postgres — triggers on transaction create/edit/delete, runs as a background task
-- Sanity checks (sell larger than position, unknown ticker)
+- `backend`: SQLAlchemy models mirroring the domain entities (`assets`, `transactions`, `positions`), Alembic migrations (initial migration also seeds a starter B3 asset catalog)
+- Single-user authentication (argon2 password + JWT access/refresh, see business-rules and architecture §5); `uv run python -m backend.cli hash-password` generates `APP_PASSWORD_HASH`
+- Endpoints: `POST/GET/PATCH/DELETE /transactions`, `GET /positions`, `GET /assets` (autocomplete) + `GET /assets/{ticker}`
+- Recalculation engine wired to real Postgres — triggers on transaction create/edit/delete, runs as a background task, exposes `recalculating` in responses
+- Sanity checks (sell larger than position on any date — including via edit/delete — returns 422 `SELL_EXCEEDS_POSITION`; unknown ticker returns 400 `UNKNOWN_TICKER`)
 
-**Definition of done**: integration tests for the endpoints against a real Postgres; idempotency test for the recalculation engine running against the database; manually enter a backdated transaction and confirm the position recalculates correctly.
+**Definition of done**: ✅ integration tests for the endpoints against a real Postgres (`backend/tests/integration/`, 26 tests); idempotency test for the recalculation engine running against the database; backdated-transaction test + manual smoke test confirming the position recalculates correctly.
 
 ## Sprint 2 — B3 statement import
 
