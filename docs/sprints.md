@@ -62,8 +62,35 @@ Suggested sequence respecting technical dependencies (e.g. you can't have a cont
 - Screen for defining targets (category % + weight per asset, equal split as the default)
 - Contribution simulator (`POST /allocation-targets/simulate`) with the suggested-purchases screen
 - "Reinvest dividends" flow using the accumulated dividend balance as the contribution amount
+- **Positions grouped into collapsible sections by category** (see below)
 
-**Definition of done**: E2E test for the full "define target → simulate contribution → review suggestion" flow; integration tests validating that category percentages are checked in `PUT /allocation-targets`.
+### Positions grouped by category
+
+The flat positions table becomes one collapsible section per category — the same
+shape the allocation targets use, so the portfolio reads against the target it is
+being measured by.
+
+```
+▾ Ações                    R$ 12.450,00   64,1%
+    ITSA4    100    R$ 9,10   +12,3%
+    ALOS3     50   R$ 20,00    -2,1%
+
+▸ FIIs                      R$ 6.980,00   35,9%
+▸ Renda Fixa                       R$ 0,00    0,0%
+```
+
+- Section header carries the category name, its total value and its share of the
+  portfolio — the numbers that matter when comparing against an allocation target.
+- Sections are ordered by portfolio weight, heaviest first.
+- Expand/collapse state persists across reloads (localStorage), so the categories
+  someone actually watches stay open.
+- A category with no positions is hidden **unless** an allocation target exists for
+  it — a 0% row is noise on its own, but it is the whole point once you have set a
+  target you are not yet filling.
+- The header is a real `button` with `aria-expanded`; grouping must not cost
+  keyboard or screen-reader access to the table.
+
+**Definition of done**: E2E test for the full "define target → simulate contribution → review suggestion" flow; integration tests validating that category percentages are checked in `PUT /allocation-targets`; E2E test collapsing a category and confirming its assets are hidden while the header totals stay visible; component test covering the grouping totals, the weight ordering, and the empty-category rule in both directions.
 
 ## Sprint 6 — Indicators and dividends
 

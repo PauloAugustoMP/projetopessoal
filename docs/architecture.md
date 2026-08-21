@@ -51,26 +51,31 @@ All containers come up via **Docker Compose** on a single machine (your computer
 
 ```
 backend/src/backend/
+  config.py              # settings from .env (pydantic-settings)
+  cli.py                 # hash-password, inspect-statement
+
   domain/                # pure business rules, no I/O — tested in isolation
     entities.py          # Asset, Transaction, Position, Dividend, CorporateAction,
                           # AllocationTarget, PortfolioSnapshot, Indicator
     average_price_calculator.py
-    corporate_action_applier.py
-    rebalance_calculator.py
-    indicator_calculator.py    # markers, ceiling price (Bazin), fair price (Graham)
-    snapshot_catchup.py
     position_history.py        # replays transactions + corporate actions chronologically
+    corporate_action_applier.py
+    snapshot_calculator.py     # one day's PortfolioSnapshot from raw history (§8)
+    snapshot_catchup.py        # which days were missed while the app was off
     statement_dedup.py         # import deduplication rule (business-rules §7)
     dividend_withholding.py    # withholding at the source per dividend type (§6)
-    snapshot_calculator.py     # one day's PortfolioSnapshot from raw history (§8)
+    asset_classification.py    # category inferred from statement evidence (business-rules §7, rule 5)
+    rebalance_calculator.py
+    indicator_calculator.py    # markers, ceiling price (Bazin), fair price (Graham)
 
   application/            # use cases — orchestrate domain + ports
     recalculation.py        # retroactive recalculation engine (background task)
     import_b3_statement.py
+    enrich_assets.py        # logo/name from the provider, after an import
     snapshot_service.py     # computes + persists a day's snapshot, resolving prices
     startup_catchup.py      # backfills snapshots missed while the app was off
-    simulate_contribution.py
-    reinvest_dividends.py
+    simulate_contribution.py   # planned — Sprint 5
+    reinvest_dividends.py      # planned — Sprint 5
 
   ports/                  # interfaces that infrastructure implements
     market_data_provider.py   # + MarketDataUnavailableError, the known failure mode
@@ -78,47 +83,68 @@ backend/src/backend/
     price_history_repository.py
 
   infrastructure/
-    persistence/          # SQLAlchemy repository implementations
+    persistence/
+      database.py           # engine/session factory
+      models.py             # SQLAlchemy tables
+      repositories.py       # port implementations + domain mapping
     market_data/
-      brapi_provider.py         # implements market_data_provider port
-      quote_cache.py            # Redis cache decorator (in-memory fallback)
-      factory.py                # composition root; swappable in tests
-      bcb_provider.py           # CDI/Selic
+      brapi_provider.py     # implements the port, on top of the official `brapi` SDK
+      quote_cache.py        # Redis cache decorator (in-memory fallback)
+      null_provider.py      # stand-in when no token is configured
+      factory.py            # composition root; swappable in tests
+      bcb_provider.py       # planned — CDI/Selic, may be unnecessary (see below)
     b3_import/
-      statement_parser.py       # CSV/Excel — extracts transactions + corporate actions + dividends
+      statement_parser.py   # CSV/Excel — transactions + corporate actions + dividends
     jobs/
-      scheduler.py              # APScheduler wiring, started in the FastAPI lifespan
+      scheduler.py          # APScheduler wiring, started in the FastAPI lifespan
       daily_snapshot.py
-      price_poll.py             # quote polling during market hours, broadcast via WS
+      price_poll.py         # quote polling during market hours, broadcast via WS
 
   api/
-    app.py                 # FastAPI app instance
-    routes/                 # routers, mirroring openapi.yaml
-    websocket.py             # near-real-time quote channel
+    app.py                 # FastAPI app, lifespan (catch-up + scheduler), CORS
+    dependencies.py        # session + auth dependencies
+    security.py            # argon2 hashing, JWT issue/verify
+    schemas.py             # request/response models, camelCase on the wire
+    errors.py              # ApiError -> the `Error` shape in openapi.yaml
+    routes/                # routers, mirroring openapi.yaml
+    websocket.py           # near-real-time quote channel
 ```
+
+The quote provider is the official `brapi` SDK wrapped by our own adapter. The SDK is an
+implementation detail of `brapi_provider.py`: its typed models and its exception taxonomy
+stop at that file, and everything above sees only the port's `Quote`/`HistoricalPrice` and
+the single `MarketDataUnavailableError`. It also exposes inflation and prime-rate
+endpoints, which may make the planned `bcb_provider` unnecessary — to be decided in
+Sprint 6, when CDI/Selic first matter.
 
 Dependency rule: `domain` doesn't know about `infrastructure`. That's what allows swapping the quote provider (e.g. moving from the free tier to a paid one later) without touching any business rule, and testing `domain`/`application` entirely with fakes for the ports — no database, no network.
 
 ## 4. Main flows
 
 ### 4.1 "Real-time" quotes
-1. The `price_poll` job runs every 15–30s during market hours (B3: 10am–5pm, Brasília time), fetching quotes for the assets you hold through `market_data_provider`.
-2. The price is cached in Redis (avoids re-querying the external API if multiple clients are connected).
-3. The backend pushes the update to the connected desktop app over WebSocket.
-4. Outside market hours, the job runs at a much longer interval (or not at all), since the price doesn't change.
+1. The `price_poll` job runs every 30s during market hours (B3: 10am–5pm, Brasília time, weekdays), fetching quotes for the assets you hold through `market_data_provider`. Outside those hours it returns immediately — the price doesn't change.
+2. Quotes are cached for 30s in Redis, so several readers close together cost one request against the provider's free tier. If Redis is unreachable the cache degrades to an in-process dict; at single-user scale, losing cross-process sharing costs nothing.
+3. The backend pushes the update to connected clients over the WebSocket channel.
+4. **Degradation is the rule, not the exception.** Any provider failure — rate limit, timeout, HTTP error, unparseable payload — surfaces as a single `MarketDataUnavailableError`, and every consumer has a defined fallback: the dashboard shows cost basis, `price_poll` logs and retries next cycle, snapshots fall back to the local price cache and then to cost. With no `BRAPI_API_TOKEN` configured the composition root substitutes a null provider and `price_poll` is not scheduled at all, so a missing token behaves like any other outage instead of a crash.
 
 ### 4.2 Backdated entry + recalculation
-1. `record_transaction` writes the transaction to the immutable ledger.
-2. It schedules the `recalculation engine` as a background task (does not block the API response).
-3. The engine recalculates, in chronological order: the asset's position/average price → the daily portfolio snapshots in the affected range (fetching historical prices via `market_data_provider` if not already cached) → dividend eligibility in that range.
-4. While it runs, the API exposes a status (`recalculating: true`) for the UI to show feedback.
-5. Execution is idempotent: running the same recalculation twice produces the same final state — a property verified by an automated test.
+1. The route writes the transaction to the ledger, after replaying the prospective history to reject a sell that would exceed the position on its date (business-rules §10).
+2. It schedules the recalculation engine as a background task (does not block the API response).
+3. The engine replays the asset's **entire** history in chronological order — transactions interleaved with corporate actions — and rewrites the position. Never incremental: that is what makes a backdated entry, edit or delete correct without special cases.
+4. While it runs, the API reports `recalculating: true` for the UI to show feedback.
+5. Execution is idempotent: running the same recalculation twice produces the same final state — verified by an automated test against the real database.
+
+**Not yet wired**: steps 2 and 3 of business-rules §2 — recalculating the daily snapshots in the affected range, and re-evaluating dividend eligibility. Snapshots are currently rebuilt by the daily job and the startup catch-up (§4.4), so a backdated entry only reaches them on the next run. Closing that gap is tracked with the dividend work in Sprint 6.
 
 ### 4.3 B3 statement import
 1. Upload of the CSV/Excel file exported from the B3 investor portal.
-2. The parser classifies each line: buy/sell, dividend (gross/net), or corporate action (split/reverse split/bonus shares/subscription rights).
+2. The parser locates the header (exports carry title rows, several sheets, and any of four delimiters — see business-rules §7) and classifies each line: buy/sell, dividend, or corporate action.
 3. Deduplication: compares ticker + date + quantity + price against what already exists before saving, so it doesn't duplicate what you already entered manually.
-4. Newly saved records trigger the same recalculation engine from 4.2.
+4. Unknown tickers are registered from the statement itself, with the category inferred from evidence in the file (business-rules §7, rule 5). The typo guard in §10 applies to hand-typed entries only.
+5. Newly saved records trigger the same recalculation engine from 4.2.
+6. Afterwards, in the background, `enrich_assets` fills in logo and display name from the quote provider — never blocking, never failing the import.
+
+**Nothing aborts the batch.** A row the parser cannot decide (unrecognized movement, no readable ticker, underivable corporate-action factor) goes to a review queue with its reason. A sell that exceeds the position is flagged rather than rejected, and its ticker is left out of recalculation until corrected — §10 again, where a batch cannot be judged row by row.
 
 ### 4.4 Catch-up on startup
 
@@ -147,9 +173,18 @@ Full detail in [business-rules.md §8.1](business-rules.md#81-catch-up-on-startu
 
 ## 6. Observability
 
-- Structured logs (structlog) in the backend.
+Current state: the standard library's `logging`, configured by uvicorn. Messages at the
+boundaries are deliberately specific about *which* failure occurred, because a personal
+app has no on-call to interpret them — a rejected WebSocket handshake says whether the
+token was expired, foreign-signed or of the wrong type; a missing provider token says so
+once at startup; a failed `daily_snapshot` says the day's value was not recorded.
+
+Planned (Sprint 7–8, none of it built yet):
+
+- Structured logs (structlog), replacing the plain formatter.
 - Correlation via `request_id` between API requests and the background tasks they trigger.
-- A simple "last job run" panel (daily_snapshot, price_poll) in the app itself, under Settings — minimal visibility without needing Grafana/Datadog for a personal project.
+- A "last job run" panel in the app under Settings, reading `last_snapshot_date` and `last_run_at` from the `system_state` table — minimal visibility without needing Grafana/Datadog.
+- Failure alerts for jobs, so a recalculation that never completed does not pass unnoticed.
 
 ## 7. Deployment
 
@@ -162,19 +197,24 @@ Full detail in [business-rules.md §8.1](business-rules.md#81-catch-up-on-startu
 ```
 /
   backend/
-    pyproject.toml     # uv-managed
+    pyproject.toml       # uv-managed
+    alembic.ini
+    migrations/          # Alembic revisions
     src/backend/
-      domain/
-      application/
-      ports/
-      infrastructure/
-      api/
+      domain/ application/ ports/ infrastructure/ api/
     tests/
-      domain/
+      domain/            # pure unit tests
+      b3_import/         # statement parser
+      market_data/       # provider contract tests (recorded fixtures)
+      api/               # small unit tests of API helpers
+      integration/       # against a real Postgres
+      fixtures/          # anonymized statements + recorded provider responses
   frontend/
     package.json
-    src/                # React + Vite
-    src-tauri/          # native Rust shell (capabilities config, per-OS build)
+    playwright.config.ts
+    src/                 # React + Vite (api/, components/, hooks/, pages/, lib/)
+    src-tauri/           # native Rust shell (capabilities config, per-OS build)
+    e2e/                 # Playwright specs
   docs/
     architecture.md
     business-rules.md
@@ -182,7 +222,9 @@ Full detail in [business-rules.md §8.1](business-rules.md#81-catch-up-on-startu
     testing-strategy.md
     openapi/
       openapi.yaml
+  data/                  # Postgres + Redis files, bind-mounted (gitignored)
   docker-compose.yml
+  .env                   # secrets, gitignored (.env.example is the template)
 ```
 
 Backend and frontend are independent projects with their own package managers (`uv` for Python, `npm` for the frontend) — they only communicate over HTTP/WebSocket, so there's no reason to force them into a single-language monorepo.

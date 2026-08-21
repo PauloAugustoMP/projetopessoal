@@ -3,8 +3,25 @@ info:
   title: Investment Tracker API
   description: >
     API for the personal investment tracking app (single-user, product reference: Investidor10).
-    Full business rules in docs/business-rules.md. Near-real-time quote updates are delivered
-    through a separate WebSocket channel (`/ws/quotes`), outside the scope of this REST spec.
+    Full business rules in docs/business-rules.md.
+
+
+    This document is both the design contract and the source for the frontend's generated
+    types, so it describes endpoints that are not built yet. Live today: `/auth/*`,
+    `/assets`, `/assets/{ticker}`, `/transactions*`, `/positions`, `/portfolio/*`,
+    `/corporate-actions` and `/import/b3-statement`. Still planned — see docs/sprints.md:
+    `/allocation-targets*` and `/dividends*` (Sprint 5), `/assets/{ticker}/indicators` and
+    `/assets/{ticker}/price-history` (Sprint 6). Paths marked `x-status: planned` are not
+    served yet.
+
+
+    Near-real-time quote updates are delivered through a separate WebSocket channel,
+    `GET /ws/quotes?token=<accessToken>` — the same JWT as the REST routes, passed as a
+    query parameter because a browser WebSocket handshake cannot carry an Authorization
+    header. An expired or invalid token gets the handshake rejected with HTTP 403, so
+    clients must refresh before connecting rather than waiting for a 401. Frames look like
+    `{ "type": "quotes", "at": <iso8601>, "quotes": { "<TICKER>": { "price": number,
+    "changePercent": number | null } } }`. Outside this REST spec by design.
   version: "1.0.0"
 servers:
   - url: http://localhost:8000/api
@@ -117,6 +134,7 @@ paths:
           $ref: "#/components/responses/NotFound"
 
   /assets/{ticker}/indicators:
+    x-status: planned
     get:
       tags: [assets]
       summary: Fundamental indicators, markers, and target prices
@@ -132,6 +150,7 @@ paths:
                 $ref: "#/components/schemas/AssetIndicators"
 
   /assets/{ticker}/price-history:
+    x-status: planned
     get:
       tags: [assets]
       summary: Historical price series
@@ -296,6 +315,7 @@ paths:
                 $ref: "#/components/schemas/GrowthBreakdown"
 
   /dividends:
+    x-status: planned
     get:
       tags: [dividends]
       summary: Dividends (history and schedule) — feeds the calendar
@@ -334,6 +354,7 @@ paths:
                 $ref: "#/components/schemas/Dividend"
 
   /dividends/reinvestment-balance:
+    x-status: planned
     get:
       tags: [dividends]
       summary: Dividend balance available for reinvestment
@@ -348,6 +369,7 @@ paths:
                   availableBalance: { type: number, format: double }
 
   /dividends/reinvest:
+    x-status: planned
     post:
       tags: [dividends]
       summary: Reinvest the dividend balance
@@ -361,6 +383,7 @@ paths:
                 $ref: "#/components/schemas/RebalanceSuggestion"
 
   /allocation-targets:
+    x-status: planned
     get:
       tags: [allocation]
       summary: Current allocation targets (by category and by asset)
@@ -395,6 +418,7 @@ paths:
                 $ref: "#/components/schemas/Error"
 
   /allocation-targets/simulate:
+    x-status: planned
     post:
       tags: [allocation]
       summary: Simulate a contribution according to the allocation targets
@@ -605,24 +629,32 @@ components:
 
     Position:
       type: object
+      description: >
+        currentPrice, profitPercentage and portfolioPercentage are null when the quote
+        provider is unavailable or unconfigured — the app degrades to cost basis rather
+        than failing the request (docs/architecture.md §4.1).
       properties:
         ticker: { type: string }
         category:
           $ref: "#/components/schemas/AssetCategory"
         quantity: { type: number }
         averagePrice: { type: number, format: double }
-        currentPrice: { type: number, format: double }
-        profitPercentage: { type: number, format: double }
-        portfolioPercentage: { type: number, format: double }
+        currentPrice: { type: number, format: double, nullable: true }
+        profitPercentage: { type: number, format: double, nullable: true }
+        portfolioPercentage: { type: number, format: double, nullable: true }
 
     PortfolioSummary:
       type: object
+      description: >
+        totalValue falls back to cost basis without quotes. todayChangePercentage is null
+        without live quotes; monthProfitPercentage is null until there is a snapshot from
+        before the current month; averageDy is null while the portfolio is empty.
       properties:
         totalValue: { type: number, format: double }
-        todayChangePercentage: { type: number, format: double }
-        monthProfitPercentage: { type: number, format: double }
+        todayChangePercentage: { type: number, format: double, nullable: true }
+        monthProfitPercentage: { type: number, format: double, nullable: true }
         monthDividends: { type: number, format: double }
-        averageDy: { type: number, format: double }
+        averageDy: { type: number, format: double, nullable: true }
         assetCount: { type: integer }
 
     PortfolioSnapshot:
@@ -651,13 +683,19 @@ components:
 
     DividendInput:
       type: object
-      required: [ticker, type, grossValuePerShare, exDate, paymentDate]
+      required: [ticker, type, grossValuePerShare, paymentDate]
       properties:
         ticker: { type: string }
         type:
           $ref: "#/components/schemas/DividendType"
         grossValuePerShare: { type: number, format: double }
-        exDate: { type: string, format: date }
+        exDate:
+          type: string
+          format: date
+          nullable: true
+          description: >
+            The B3 movement statement only carries the payment date, so imported dividends
+            have no ex-date until it is filled in manually or by the provider.
         paymentDate: { type: string, format: date }
 
     Dividend:
@@ -666,6 +704,9 @@ components:
         - type: object
           properties:
             id: { type: string, format: uuid }
+            quantity:
+              type: number
+              description: Shares that earned the payout, used for the reinvestment balance.
             withholdingTaxRate: { type: number, format: double }
             netValuePerShare: { type: number, format: double }
             status:
@@ -736,10 +777,15 @@ components:
         type:
           $ref: "#/components/schemas/CorporateActionType"
         date: { type: string, format: date }
-        factor: { type: number, format: double }
+        factor:
+          type: number
+          format: double
+          description: >
+            Multiplicative factor applied to the quantity, derived from the position held
+            on the event date (docs/business-rules.md §5).
         source:
           type: string
-          enum: [b3_import]
+          enum: [manual, b3_import]
 
     ImportResult:
       type: object
@@ -748,6 +794,12 @@ components:
         dividendsCreated: { type: integer }
         corporateActionsCreated: { type: integer }
         duplicatesSkipped: { type: integer }
+        assetsCreated:
+          type: integer
+          description: >
+            Assets the statement introduced that were not in the catalog yet. The import
+            registers them from the file itself (docs/business-rules.md §7, rule 5) instead of
+            rejecting the row.
         rowsForManualReview:
           type: array
           items:

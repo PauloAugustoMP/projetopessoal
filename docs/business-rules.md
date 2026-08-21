@@ -125,12 +125,19 @@ Regressive schedule (fixed income, applied to the yield at redemption):
 
 ## 7. B3 statement import
 
-1. Upload of the CSV/Excel file exported from the B3 investor portal.
-2. The parser classifies each line as: a transaction (buy/sell), a dividend, or a corporate action (section 5).
-3. **Deduplication**: a line is only saved if no equivalent transaction already exists (same ticker + date + quantity + price, within a cent's tolerance). On an ambiguous match (more than one candidate), the line is flagged for manual review instead of being decided automatically.
-4. **Unknown assets are registered, not rejected**: the statement is authoritative and already carries the product name, so an unfamiliar ticker is added to the catalog rather than blocked. The category is inferred from evidence in the file itself — a `Rendimento` payout means a REIT, `Dividendo`/`JCP` means a company share — falling back to the ticker's suffix only when the file shows no payout (`11`/`12`/`13` → REIT, `3`–`6` → stock). Evidence must win over the suffix, since Units such as TAEE11 and SAPR11 end in `11` without being REITs. The typo guard in section 10 applies to hand-typed entries only.
-5. **Catalog enrichment** happens afterwards and in the background: logo and display name are fetched from the quote provider. It never blocks or fails the import, only fills in the logo when missing and only replaces a name when all we had was the ticker — B3's wording is what the user recognizes.
-6. Every newly saved line triggers the recalculation engine (section 2).
+1. Upload of the CSV/Excel file exported from the B3 investor portal, unedited.
+2. **Locating the data** is part of the rule, not an implementation detail — real exports vary. The delimiter may be `;`, `,`, tab or `|`, and is chosen by which one yields the most recognizable columns rather than by counting characters (decimal commas outnumber real separators). The header may sit below title or filter rows, and an `.xlsx` may hold several sheets; the parser scans for the row and sheet that recognize the most expected columns.
+3. **Classifying each line** as a transaction (buy/sell), a dividend, or a corporate action (section 5):
+   - **Trades**: `Transferência - Liquidação`, and also plain `Compra`/`Venda` — some brokers report the same settlement with the shorter wording. Credit/debit decides the direction when the wording does not.
+   - **Payouts**: `Dividendo`, `Juros Sobre Capital Próprio`, `Rendimento` (section 6).
+   - **Corporate actions**: `Desdobro`/`Desdobramento`, `Grupamento`, `Bonificação em Ativos` (section 5).
+   - **Subscription**: only an *exercised* right becomes a buy. Receiving, requesting or letting rights lapse — including leftovers (`sobras`) and receipts — does not move the position and is skipped silently, like `Atualização` and other informational rows.
+   - A ticker is only accepted when it looks like one: letters followed by a numeric suffix (`ITSA4`, `TAEE11`, `BOVA11`, `AAPL34`). Requiring the digits is what separates a ticker from a description — without it, `TESOURO SELIC 2029` would register a phantom asset named `TESOURO`, which is worse than failing because it fails silently. Rows without a readable ticker go to review; fixed income is out of the import's scope for now.
+4. **Deduplication**: a line is only saved if no equivalent transaction already exists (same ticker + date + quantity + price, within a cent's tolerance). On an ambiguous match (more than one candidate), the line is flagged for manual review instead of being decided automatically.
+5. **Unknown assets are registered, not rejected**: the statement is authoritative and already carries the product name, so an unfamiliar ticker is added to the catalog rather than blocked. The category is inferred from evidence in the file itself — a `Rendimento` payout means a REIT, `Dividendo`/`JCP` means a company share — falling back to the ticker's suffix only when the file shows no payout (`11`/`12`/`13` → REIT, `3`–`6` → stock). Evidence must win over the suffix, since Units such as TAEE11 and SAPR11 end in `11` without being REITs. The typo guard in section 10 applies to hand-typed entries only.
+6. **Catalog enrichment** happens afterwards and in the background: logo and display name are fetched from the quote provider. It never blocks or fails the import, only fills in the logo when missing and only replaces a name when all we had was the ticker — B3's wording is what the user recognizes.
+7. Every newly saved line triggers the recalculation engine (section 2).
+8. **A bad row never aborts the batch.** Anything undecidable — unrecognized movement, unreadable ticker, ambiguous duplicate, underivable corporate-action factor — is recorded in the review queue with its reason and row number, and the rest of the file is imported. This is the batch counterpart of the sanity-check rule in section 10.
 
 ## 8. Daily snapshots and growth breakdown
 
@@ -168,5 +175,5 @@ The "Reinvest now" flow uses `availableReinvestmentBalance` as the `C` input to 
 ## 10. Sanity checks
 
 - **Sell larger than the position on that date**: manual entry is blocked with an immediate error. On statement import (where several lines come in together and order matters), the check runs **after** the full batch has been recalculated, and flags the inconsistency for review instead of rejecting the line in isolation.
-- **Unknown ticker**: blocks a *manually entered* transaction until the asset is confirmed (prevents a silent typo). Statement imports are exempt — see section 7.4.
+- **Unknown ticker**: blocks a *manually entered* transaction until the asset is confirmed (prevents a silent typo). Statement imports are exempt — see section 7, rule 5.
 - Every retroactive change is recorded in an audit log with the option to undo the last change.

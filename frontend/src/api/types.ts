@@ -996,6 +996,7 @@ export interface components {
             /** @description true while the recalculation engine is still processing this change. */
             recalculating?: boolean;
         };
+        /** @description currentPrice, profitPercentage and portfolioPercentage are null when the quote provider is unavailable or unconfigured — the app degrades to cost basis rather than failing the request (docs/architecture.md §4.1). */
         Position: {
             ticker?: string;
             category?: components["schemas"]["AssetCategory"];
@@ -1003,23 +1004,24 @@ export interface components {
             /** Format: double */
             averagePrice?: number;
             /** Format: double */
-            currentPrice?: number;
+            currentPrice?: number | null;
             /** Format: double */
-            profitPercentage?: number;
+            profitPercentage?: number | null;
             /** Format: double */
-            portfolioPercentage?: number;
+            portfolioPercentage?: number | null;
         };
+        /** @description totalValue falls back to cost basis without quotes. todayChangePercentage is null without live quotes; monthProfitPercentage is null until there is a snapshot from before the current month; averageDy is null while the portfolio is empty. */
         PortfolioSummary: {
             /** Format: double */
             totalValue?: number;
             /** Format: double */
-            todayChangePercentage?: number;
+            todayChangePercentage?: number | null;
             /** Format: double */
-            monthProfitPercentage?: number;
+            monthProfitPercentage?: number | null;
             /** Format: double */
             monthDividends?: number;
             /** Format: double */
-            averageDy?: number;
+            averageDy?: number | null;
             assetCount?: number;
         };
         PortfolioSnapshot: {
@@ -1053,14 +1055,19 @@ export interface components {
             type: components["schemas"]["DividendType"];
             /** Format: double */
             grossValuePerShare: number;
-            /** Format: date */
-            exDate: string;
+            /**
+             * Format: date
+             * @description The B3 movement statement only carries the payment date, so imported dividends have no ex-date until it is filled in manually or by the provider.
+             */
+            exDate?: string | null;
             /** Format: date */
             paymentDate: string;
         };
         Dividend: components["schemas"]["DividendInput"] & {
             /** Format: uuid */
             id?: string;
+            /** @description Shares that earned the payout, used for the reinvestment balance. */
+            quantity?: number;
             /** Format: double */
             withholdingTaxRate?: number;
             /** Format: double */
@@ -1115,16 +1122,21 @@ export interface components {
             type?: components["schemas"]["CorporateActionType"];
             /** Format: date */
             date?: string;
-            /** Format: double */
+            /**
+             * Format: double
+             * @description Multiplicative factor applied to the quantity, derived from the position held on the event date (docs/business-rules.md §5).
+             */
             factor?: number;
             /** @enum {string} */
-            source?: "b3_import";
+            source?: "manual" | "b3_import";
         };
         ImportResult: {
             transactionsCreated?: number;
             dividendsCreated?: number;
             corporateActionsCreated?: number;
             duplicatesSkipped?: number;
+            /** @description Assets the statement introduced that were not in the catalog yet. The import registers them from the file itself (docs/business-rules.md §7, rule 5) instead of rejecting the row. */
+            assetsCreated?: number;
             rowsForManualReview?: {
                 row?: number;
                 reason?: string;
