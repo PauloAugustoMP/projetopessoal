@@ -47,8 +47,15 @@ def migrated_database():
     command.upgrade(config, "head")
 
 
+@pytest.fixture(scope="session")
+def seeded_tickers(migrated_database) -> list[str]:
+    """The catalog shipped by the migration — everything else is test residue."""
+    with get_engine().begin() as connection:
+        return [row[0] for row in connection.execute(text("SELECT ticker FROM assets"))]
+
+
 @pytest.fixture(autouse=True)
-def clean_tables(migrated_database):
+def clean_tables(seeded_tickers):
     yield
     with get_engine().begin() as connection:
         connection.execute(
@@ -56,6 +63,12 @@ def clean_tables(migrated_database):
                 "TRUNCATE transactions, positions, dividends, corporate_actions, "
                 "import_review_rows, portfolio_snapshots, price_history, system_state"
             )
+        )
+        # Imports register assets on the fly; drop those so the next test starts
+        # from the same catalog.
+        connection.execute(
+            text("DELETE FROM assets WHERE ticker <> ALL(:seeded)"),
+            {"seeded": seeded_tickers},
         )
 
 

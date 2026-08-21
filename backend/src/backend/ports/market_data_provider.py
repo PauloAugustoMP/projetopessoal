@@ -16,6 +16,7 @@ class Quote:
     price: float
     logo_url: Optional[str] = None
     change_percent: Optional[float] = None  # daily variation reported by the provider
+    name: Optional[str] = None  # provider's display name, used to enrich the catalog
 
 
 @dataclass(frozen=True)

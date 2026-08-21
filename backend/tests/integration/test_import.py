@@ -89,3 +89,56 @@ def test_a_file_that_is_not_a_statement_returns_400(client, auth_headers):
     )
     assert response.status_code == 400
     assert response.json()["code"] == "INVALID_STATEMENT_FILE"
+
+
+def test_unknown_tickers_are_registered_from_the_statement_itself(client, auth_headers):
+    """A statement is authoritative and carries the product name, so an unknown
+    ticker is registered rather than rejected — the typo guard (§10) belongs to
+    hand-typed entries, not to imports."""
+    csv_content = (
+        "Entrada/Saída;Data;Movimentação;Produto;Instituição;Quantidade;Preço unitário;Valor da Operação\n"
+        "Credito;10/01/2026;Transferência - Liquidação;TRXF11 - TRX REAL ESTATE FDO INV IMOB;COR;10;R$ 100,00;R$ 1.000,00\n"
+        "Credito;20/01/2026;Rendimento;TRXF11 - TRX REAL ESTATE FDO INV IMOB;COR;10;R$ 0,90;R$ 9,00\n"
+        "Credito;10/02/2026;Transferência - Liquidação;ALOS3 - ALLOS S.A.;COR;50;R$ 20,00;R$ 1.000,00\n"
+        "Credito;20/02/2026;Dividendo;ALOS3 - ALLOS S.A.;COR;50;R$ 0,30;R$ 15,00\n"
+    ).encode("utf-8")
+
+    response = client.post(
+        "/api/import/b3-statement",
+        files={"file": ("extrato.csv", csv_content, "text/csv")},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["assetsCreated"] == 2
+    assert body["transactionsCreated"] == 2
+    assert body["rowsForManualReview"] == []
+
+    assets = {a["ticker"]: a for a in client.get("/api/assets", headers=auth_headers).json()}
+    # Category inferred from the payout each one made, not from a guess.
+    assert assets["TRXF11"]["category"] == "reit"
+    assert assets["ALOS3"]["category"] == "stock"
+    assert assets["TRXF11"]["name"] == "TRX REAL ESTATE FDO INV IMOB"
+
+    positions = {p["ticker"]: p for p in client.get("/api/positions", headers=auth_headers).json()}
+    assert positions["TRXF11"]["quantity"] == 10
+    assert positions["ALOS3"]["quantity"] == 50
+
+
+def test_reimporting_does_not_recreate_assets(client, auth_headers):
+    csv_content = (
+        "Entrada/Saída;Data;Movimentação;Produto;Instituição;Quantidade;Preço unitário;Valor da Operação\n"
+        "Credito;10/01/2026;Compra;KNCR11 - KINEA RENDIMENTOS IMOB;COR;10;R$ 100,00;R$ 1.000,00\n"
+    ).encode("utf-8")
+    files = {"file": ("extrato.csv", csv_content, "text/csv")}
+
+    first = client.post("/api/import/b3-statement", files=files, headers=auth_headers).json()
+    second = client.post(
+        "/api/import/b3-statement",
+        files={"file": ("extrato.csv", csv_content, "text/csv")},
+        headers=auth_headers,
+    ).json()
+
+    assert first["assetsCreated"] == 1
+    assert second["assetsCreated"] == 0
+    assert second["duplicatesSkipped"] == 1

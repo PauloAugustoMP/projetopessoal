@@ -107,3 +107,36 @@ def test_price_poll_broadcasts_quotes_for_held_tickers(client, auth_headers, fak
     assert len(received) == 1
     assert received[0]["quotes"]["ITSA4"]["price"] == 11.0
     assert fake_provider.quote_calls == [["ITSA4"]]
+
+
+def test_an_expired_token_is_rejected(client):
+    """The access token lives 15 minutes and the socket carries it in the
+    handshake URL, so an expired one is rejected before the connection opens —
+    there is no 401 for the client to react to. The frontend refreshes ahead of
+    every attempt for exactly this reason."""
+    from datetime import datetime, timedelta, timezone
+
+    import jwt
+
+    from backend.config import get_settings
+
+    expired = jwt.encode(
+        {
+            "sub": "user",
+            "type": "access",
+            "iat": datetime.now(timezone.utc) - timedelta(hours=1),
+            "exp": datetime.now(timezone.utc) - timedelta(minutes=45),
+        },
+        get_settings().jwt_secret,
+        algorithm="HS256",
+    )
+    with pytest.raises(Exception):
+        with client.websocket_connect(f"/ws/quotes?token={expired}"):
+            pass
+
+
+def test_a_refresh_token_cannot_open_the_quote_channel(client):
+    login = client.post("/api/auth/login", json={"password": "test-password"}).json()
+    with pytest.raises(Exception):
+        with client.websocket_connect(f"/ws/quotes?token={login['refreshToken']}"):
+            pass

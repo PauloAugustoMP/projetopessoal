@@ -22,3 +22,6 @@ frontend/dist/
 
 # Local backups
 backups/
+
+# Local database volumes (docker-compose bind mounts)
+/data/

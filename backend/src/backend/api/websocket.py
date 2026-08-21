@@ -49,10 +49,34 @@ class QuoteBroadcaster:
 broadcaster = QuoteBroadcaster()
 
 
+def _rejection_reason(token: str, secret: str) -> str:
+    """Diagnostic only — never sent to the client, which gets a generic rejection."""
+    import jwt
+
+    try:
+        jwt.decode(token, secret, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        return "token expired"
+    except jwt.InvalidSignatureError:
+        return "signature does not match JWT_SECRET"
+    except jwt.PyJWTError as error:
+        return f"invalid token ({type(error).__name__})"
+    return "wrong token type (a refresh token cannot open the channel)"
+
+
 @router.websocket("/ws/quotes")
 async def quotes_websocket(websocket: WebSocket, token: str | None = Query(default=None)) -> None:
     settings = get_settings()
     if token is None or decode_token(token, settings.jwt_secret, "access") is None:
+        # Closing before accepting makes Starlette reject the handshake with HTTP
+        # 403, so the client never sees this code — hence the explicit log line:
+        # an expired token is by far the most common cause and looks identical to
+        # a forged one in the access log.
+        logger.info(
+            "Rejected /ws/quotes handshake: %s. The client should refresh the "
+            "access token before reconnecting.",
+            "no token provided" if token is None else _rejection_reason(token, settings.jwt_secret),
+        )
         await websocket.close(code=4401, reason="Missing or invalid access token.")
         return
 

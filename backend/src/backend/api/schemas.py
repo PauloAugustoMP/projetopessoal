@@ -68,6 +68,7 @@ class ImportResultResponse(ApiModel):
     dividends_created: int
     corporate_actions_created: int
     duplicates_skipped: int
+    assets_created: int
     rows_for_manual_review: list[ReviewRowResponse]
 
 

@@ -14,6 +14,7 @@ from datetime import date as date_type
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.domain.asset_classification import infer_category
 from backend.domain.average_price_calculator import InsufficientPositionError
 from backend.domain.dividend_withholding import net_value_per_share, withholding_rate_for
 from backend.domain.entities import CorporateAction, Transaction
@@ -42,6 +43,7 @@ class ImportResult:
     dividends_created: int = 0
     corporate_actions_created: int = 0
     duplicates_skipped: int = 0
+    assets_created: int = 0
     rows_for_manual_review: list[dict] = field(default_factory=list)
     affected_tickers: set[str] = field(default_factory=set)
     # Tickers whose post-import history is inconsistent (sell exceeds position):
@@ -83,16 +85,36 @@ def import_b3_statement(
 
     known_tickers = set(session.scalars(select(AssetModel.ticker)).all())
 
-    def ticker_known(row: int, ticker: str, raw: str = "") -> bool:
+    # The unknown-ticker guard (docs/business-rules.md §10) exists to catch a typo
+    # in a *hand-typed* entry. A statement is authoritative and carries the name
+    # itself, so here we register the asset instead of rejecting the row.
+    payout_evidence: dict[str, set[str]] = {}
+    for dividend in statement.dividends:
+        payout_evidence.setdefault(dividend.ticker, set()).add(dividend.type)
+
+    names: dict[str, str] = {}
+    for record in (*statement.trades, *statement.dividends, *statement.corporate_actions):
+        if record.name and record.ticker not in names:
+            names[record.ticker] = record.name
+
+    def ensure_asset_exists(ticker: str) -> None:
         if ticker in known_tickers:
-            return True
-        review.append((row, f"Unknown ticker {ticker} — confirm the asset first.", raw))
-        return False
+            return
+        session.add(
+            AssetModel(
+                ticker=ticker,
+                name=names.get(ticker, ticker)[:120],
+                category=infer_category(ticker, payout_evidence.get(ticker)),
+                logo_url=None,
+            )
+        )
+        session.flush()
+        known_tickers.add(ticker)
+        result.assets_created += 1
 
     # --- transactions (chronological order matters for the later factor derivation)
     for trade in sorted(statement.trades, key=lambda t: t.date):
-        if not ticker_known(trade.row, trade.ticker):
-            continue
+        ensure_asset_exists(trade.ticker)
         existing = [
             to_domain_transaction(m)
             for m in session.scalars(
@@ -139,8 +161,7 @@ def import_b3_statement(
 
     # --- dividends
     for dividend in statement.dividends:
-        if not ticker_known(dividend.row, dividend.ticker):
-            continue
+        ensure_asset_exists(dividend.ticker)
         duplicate = session.scalars(
             select(DividendModel).where(
                 DividendModel.ticker == dividend.ticker,
@@ -176,8 +197,7 @@ def import_b3_statement(
 
     # --- corporate actions (factor derived against the position on that date)
     for event in sorted(statement.corporate_actions, key=lambda e: e.date):
-        if not ticker_known(event.row, event.ticker):
-            continue
+        ensure_asset_exists(event.ticker)
         already = session.scalars(
             select(CorporateActionModel).where(
                 CorporateActionModel.ticker == event.ticker,

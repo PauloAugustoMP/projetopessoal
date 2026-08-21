@@ -128,7 +128,9 @@ Regressive schedule (fixed income, applied to the yield at redemption):
 1. Upload of the CSV/Excel file exported from the B3 investor portal.
 2. The parser classifies each line as: a transaction (buy/sell), a dividend, or a corporate action (section 5).
 3. **Deduplication**: a line is only saved if no equivalent transaction already exists (same ticker + date + quantity + price, within a cent's tolerance). On an ambiguous match (more than one candidate), the line is flagged for manual review instead of being decided automatically.
-4. Every newly saved line triggers the recalculation engine (section 2).
+4. **Unknown assets are registered, not rejected**: the statement is authoritative and already carries the product name, so an unfamiliar ticker is added to the catalog rather than blocked. The category is inferred from evidence in the file itself — a `Rendimento` payout means a REIT, `Dividendo`/`JCP` means a company share — falling back to the ticker's suffix only when the file shows no payout (`11`/`12`/`13` → REIT, `3`–`6` → stock). Evidence must win over the suffix, since Units such as TAEE11 and SAPR11 end in `11` without being REITs. The typo guard in section 10 applies to hand-typed entries only.
+5. **Catalog enrichment** happens afterwards and in the background: logo and display name are fetched from the quote provider. It never blocks or fails the import, only fills in the logo when missing and only replaces a name when all we had was the ticker — B3's wording is what the user recognizes.
+6. Every newly saved line triggers the recalculation engine (section 2).
 
 ## 8. Daily snapshots and growth breakdown
 
@@ -166,5 +168,5 @@ The "Reinvest now" flow uses `availableReinvestmentBalance` as the `C` input to 
 ## 10. Sanity checks
 
 - **Sell larger than the position on that date**: manual entry is blocked with an immediate error. On statement import (where several lines come in together and order matters), the check runs **after** the full batch has been recalculated, and flags the inconsistency for review instead of rejecting the line in isolation.
-- **Unknown ticker**: blocks the entry until the asset is confirmed (prevents a silent typo).
+- **Unknown ticker**: blocks a *manually entered* transaction until the asset is confirmed (prevents a silent typo). Statement imports are exempt — see section 7.4.
 - Every retroactive change is recorded in an audit log with the option to undo the last change.

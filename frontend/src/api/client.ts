@@ -8,6 +8,10 @@ const BASE_URL: string =
 const ACCESS_TOKEN_KEY = "accessToken";
 const REFRESH_TOKEN_KEY = "refreshToken";
 
+/** Refresh this many seconds before the access token actually expires, so a
+ * request or handshake in flight never races the expiry. */
+const TOKEN_REFRESH_MARGIN_SECONDS = 60;
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -98,6 +102,33 @@ export const api = {
   upload: <T>(path: string, form: FormData) =>
     request<T>(path, { method: "POST", body: form }),
 };
+
+/** Seconds left on the stored access token, or 0 when it is missing/unreadable.
+ * The payload is only *read* here — the backend is what verifies the signature. */
+function accessTokenSecondsLeft(): number {
+  const token = getAccessToken();
+  if (!token) return 0;
+  try {
+    const [, payload] = token.split(".");
+    const { exp } = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))) as {
+      exp?: number;
+    };
+    if (!exp) return 0;
+    return Math.max(0, exp - Date.now() / 1000);
+  } catch {
+    return 0;
+  }
+}
+
+/** Refreshes the access token when it is expired or about to be.
+ *
+ * REST calls refresh reactively (on a 401), but the WebSocket handshake carries
+ * the token in the URL and gets rejected outright — there is no 401 to react to.
+ * Callers that open a socket must refresh ahead of time instead. */
+export async function ensureFreshAccessToken(): Promise<boolean> {
+  if (accessTokenSecondsLeft() > TOKEN_REFRESH_MARGIN_SECONDS) return true;
+  return tryRefresh();
+}
 
 export function quotesWebSocketUrl(): string {
   const token = getAccessToken() ?? "";
