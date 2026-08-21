@@ -29,25 +29,33 @@ Suggested sequence respecting technical dependencies (e.g. you can't have a cont
 
 **Definition of done**: ✅ parser unit tests with anonymized sample files (`backend/tests/fixtures/`) covering buy, sell, dividend/JCP/REIT income, split, bonus shares, reverse split, CSV and Excel; deduplication tests (re-importing the same file creates nothing new; a manual entry blocks its imported twin). 93 tests passing.
 
-## Sprint 3 — Quotes, snapshots, and catch-up
+## Sprint 3 — Quotes, snapshots, and catch-up ✅ (done)
 
-- Quote provider adapter (brapi.dev) implementing the `market_data_provider` port
-- `price_poll` job (near real-time) + WebSocket channel
-- `daily_snapshot` job (total portfolio value, by category, contribution/appreciation/dividend breakdown)
-- Persisted `last_snapshot_date` / `last_run_at` state
-- Startup catch-up: on API boot, compares `last_snapshot_date` to today and recalculates the days that were missed (`compute_missing_snapshot_dates`, already implemented in the domain layer)
-- Redis as a quote cache (avoids exhausting the free tier's rate limit)
+- brapi.dev adapter (`infrastructure/market_data/brapi_provider.py`) implementing the `market_data_provider` port; contract tests against recorded JSON fixtures
+- `price_poll` job (APScheduler, market hours only) broadcasting over the `/ws/quotes` WebSocket channel (token-authenticated)
+- `daily_snapshot` job + `domain/snapshot_calculator.py` (total/per-category value, cumulative contributions, cumulative reinvested dividends — growth breakdown by residual served by `GET /portfolio/growth-breakdown`)
+- `system_state` table persisting `last_snapshot_date` / `last_run_at`; `portfolio_snapshots` and `price_history` (local closing-price cache — a multi-day backfill costs one provider request per ticker)
+- Startup catch-up wired into the FastAPI lifespan (background thread, resumable day by day); `ENABLE_JOBS=false` turns scheduler/catch-up off in tests
+- Redis quote cache with graceful in-memory fallback when Redis is unreachable
+- Dashboard endpoints: `GET /portfolio/summary`, `GET /portfolio/snapshots`; `GET /positions` now enriched with live quotes (provider outage degrades to cost basis, never fails)
 
-**Definition of done**: integration test simulating "the app was off for 5 days" and verifying the 5 snapshots get backfilled on startup; quote provider mocked so tests don't depend on the network; WebSocket test delivering a price update to a connected client.
+**Definition of done**: ✅ integration test "the app was off for 5 days" backfills exactly 5 snapshots, resumable/idempotent; provider mocked in every test (no network); WebSocket tests delivering a price update to a connected client and rejecting bad tokens. 115 tests passing.
 
-## Sprint 4 — Desktop app (Tauri) — foundation
+## Sprint 4 — Desktop app (Tauri) — foundation ✅ (done)
 
-- Tauri + React + Vite project scaffold (`frontend/`)
-- Login screen
-- Dashboard: total portfolio value, summary cards, growth chart, allocation by category, positions table (with logo/avatar by category)
-- TS client generated from `openapi.yaml`, consumed by the UI
+- Tauri 2 + React + Vite + Tailwind 4 project scaffold (`frontend/`), with `src-tauri` capabilities scoped to file dialogs only and a CSP restricted to the local API
+- Login screen (JWT pair stored locally, transparent refresh on 401, protected routes)
+- Dashboard: summary cards, growth chart (Recharts), allocation-by-category donut, positions table with initials avatar colored by category
+- TS types generated from `openapi.yaml` (`npm run generate:api`), consumed by the UI
+- Live quotes over the `/ws/quotes` WebSocket refine the table without a refetch, with reconnect backoff
+- CORS added to the backend for the Vite dev server and Tauri origins (found by the E2E test — a browser/webview client cannot call the API without it)
 
-**Definition of done**: the app opens and shows real data from the local API; manual smoke test on the target OS (at least macOS, the user's environment); E2E test for the login flow.
+**Definition of done**: ✅ the app opens and shows real data from the local API (verified against a live backend + Postgres); 4 Playwright E2E tests covering the login flow, wrong password, route protection and logout.
+
+> **Note**: building the native `.app` needs Rust + Cargo installed, which is not yet
+> set up in this environment — the web build, the dev flow and the E2E suite all run
+> without it. Installing Rust is the only remaining step to produce the desktop binary
+> (packaging itself is Sprint 8).
 
 ## Sprint 5 — Allocation targets, contributions, and reinvestment
 

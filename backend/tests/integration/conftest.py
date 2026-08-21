@@ -14,6 +14,7 @@ os.environ["DATABASE_URL"] = os.environ.get(
 )
 os.environ["JWT_SECRET"] = "integration-test-secret-0123456789abcdef"
 os.environ["JWT_REFRESH_SECRET"] = "integration-test-refresh-secret-0123456789abcdef"
+os.environ["ENABLE_JOBS"] = "false"  # no scheduler/catch-up/network in tests
 
 from backend.api.security import hash_password  # noqa: E402
 
@@ -52,7 +53,8 @@ def clean_tables(migrated_database):
     with get_engine().begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE transactions, positions, dividends, corporate_actions, import_review_rows"
+                "TRUNCATE transactions, positions, dividends, corporate_actions, "
+                "import_review_rows, portfolio_snapshots, price_history, system_state"
             )
         )
 

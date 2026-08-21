@@ -1,0 +1,14 @@
+{
+  "results": [
+    {
+      "symbol": "ITSA4",
+      "regularMarketPrice": 11.42,
+      "historicalDataPrice": [
+        { "date": 1767139200, "open": 10.9, "high": 11.1, "low": 10.8, "close": 11.0, "volume": 1000000 },
+        { "date": 1767398400, "open": 11.0, "high": 11.3, "low": 10.9, "close": 11.2, "volume": 900000 },
+        { "date": 1767484800, "open": 11.2, "high": 11.4, "low": 11.0, "close": 11.1, "volume": 800000 },
+        { "date": 1767571200, "open": 11.1, "high": 11.2, "low": 10.6, "close": null, "volume": 0 }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "results": [
+    {
+      "symbol": "ITSA4",
+      "shortName": "ITAUSA PN N1",
+      "regularMarketPrice": 11.42,
+      "regularMarketChangePercent": 1.15,
+      "logourl": "https://icons.brapi.dev/icons/ITSA4.svg"
+    },
+    {
+      "symbol": "MXRF11",
+      "shortName": "FII MAXI REN",
+      "regularMarketPrice": 10.05,
+      "regularMarketChangePercent": -0.3
+    }
+  ],
+  "requestedAt": "2026-08-20T14:00:00.000Z",
+  "took": "50ms"
+}

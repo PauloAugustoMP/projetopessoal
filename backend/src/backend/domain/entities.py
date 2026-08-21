@@ -42,10 +42,11 @@ class Dividend:
     ticker: str
     type: DividendType
     gross_value_per_share: float
-    ex_date: str
+    ex_date: Optional[str]
     payment_date: str
     withholding_tax_rate: float
     net_value_per_share: float
+    quantity: float = 0.0  # shares that earned the payout
     reinvested: bool = False
 
 

@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Numeric, String
+from sqlalchemy import JSON, Date, DateTime, Enum, ForeignKey, Numeric, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 ASSET_CATEGORIES = ("stock", "reit", "fixed_income", "crypto")
@@ -104,6 +104,41 @@ class ImportReviewRowModel(Base):
     raw_content: Mapped[str] = mapped_column(String(1000))
     filename: Mapped[str] = mapped_column(String(255))
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class SystemStateModel(Base):
+    """Key-value persisted state (docs/business-rules.md §8.1): last_snapshot_date,
+    last_run_at — what makes the startup catch-up resumable."""
+
+    __tablename__ = "system_state"
+
+    key: Mapped[str] = mapped_column(String(50), primary_key=True)
+    value: Mapped[str] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class PortfolioSnapshotModel(Base):
+    __tablename__ = "portfolio_snapshots"
+
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    total_value: Mapped[float] = mapped_column(Numeric(18, 6))
+    value_by_category: Mapped[dict] = mapped_column(JSON)
+    cumulative_contributions: Mapped[float] = mapped_column(Numeric(18, 6))
+    cumulative_reinvested_dividends: Mapped[float] = mapped_column(Numeric(18, 6))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class PriceHistoryModel(Base):
+    """Local cache of daily closing prices fetched from the provider — lets
+    snapshot backfills re-run without re-hitting the free-tier API."""
+
+    __tablename__ = "price_history"
+
+    ticker: Mapped[str] = mapped_column(ForeignKey("assets.ticker"), primary_key=True)
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    price: Mapped[float] = mapped_column(Numeric(18, 6))
 
 
 class PositionModel(Base):

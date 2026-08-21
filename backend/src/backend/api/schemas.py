@@ -88,3 +88,27 @@ class PositionResponse(ApiModel):
     current_price: Optional[float] = None
     profit_percentage: Optional[float] = None
     portfolio_percentage: Optional[float] = None
+
+
+class PortfolioSummaryResponse(ApiModel):
+    total_value: float
+    today_change_percentage: Optional[float] = None
+    month_profit_percentage: Optional[float] = None
+    month_dividends: float
+    average_dy: Optional[float] = None
+    asset_count: int
+
+
+class PortfolioSnapshotResponse(ApiModel):
+    date: date
+    total_value: float
+    value_by_category: dict[str, float]
+    cumulative_contributions: float
+    cumulative_reinvested_dividends: float
+
+
+class GrowthBreakdownResponse(ApiModel):
+    total_change: float
+    contributions: float
+    appreciation: float
+    reinvested_dividends: float

@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+:root {
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+  @apply bg-slate-100 text-slate-900 antialiased;
+}

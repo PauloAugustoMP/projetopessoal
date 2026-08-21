@@ -62,16 +62,18 @@ backend/src/backend/
     position_history.py        # replays transactions + corporate actions chronologically
     statement_dedup.py         # import deduplication rule (business-rules §7)
     dividend_withholding.py    # withholding at the source per dividend type (§6)
+    snapshot_calculator.py     # one day's PortfolioSnapshot from raw history (§8)
 
   application/            # use cases — orchestrate domain + ports
-    record_transaction.py
+    recalculation.py        # retroactive recalculation engine (background task)
     import_b3_statement.py
+    snapshot_service.py     # computes + persists a day's snapshot, resolving prices
+    startup_catchup.py      # backfills snapshots missed while the app was off
     simulate_contribution.py
     reinvest_dividends.py
-    get_portfolio_growth.py
 
   ports/                  # interfaces that infrastructure implements
-    market_data_provider.py
+    market_data_provider.py   # + MarketDataUnavailableError, the known failure mode
     transaction_repository.py
     price_history_repository.py
 
@@ -79,10 +81,13 @@ backend/src/backend/
     persistence/          # SQLAlchemy repository implementations
     market_data/
       brapi_provider.py         # implements market_data_provider port
+      quote_cache.py            # Redis cache decorator (in-memory fallback)
+      factory.py                # composition root; swappable in tests
       bcb_provider.py           # CDI/Selic
     b3_import/
       statement_parser.py       # CSV/Excel — extracts transactions + corporate actions + dividends
     jobs/
+      scheduler.py              # APScheduler wiring, started in the FastAPI lifespan
       daily_snapshot.py
       price_poll.py             # quote polling during market hours, broadcast via WS
 
@@ -136,6 +141,7 @@ Full detail in [business-rules.md §8.1](business-rules.md#81-catch-up-on-startu
 - Secrets (API keys) in environment variables, never in the repository.
 - HTTPS even locally, via Tailscale's own certificate (which already provides end-to-end TLS) or mkcert for LAN-only use.
 - Rate limiting on API routes; payload validation on every route (Pydantic models, shared with the OpenAPI schemas).
+- CORS restricted to the desktop app's own origins (the Vite dev server and the Tauri webview) — the API is never open to arbitrary web origins.
 - Automatic daily Postgres backup (`pg_dump`) + free data export on demand (CSV/JSON) by the user.
 - **Tauri**: the desktop app explicitly declares, in `tauri.conf.json`, which capabilities it has access to (network only to the configured API host, filesystem only for the CSV import / backup export dialogs). Unlike Electron, there's no Node.js exposed to the frontend — the desktop process's attack surface is much smaller.
 

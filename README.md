@@ -7,10 +7,17 @@ Personal, single-user investment tracking app, inspired by Investidor10. Full do
 ```
 backend/     # Python + FastAPI + uv — business logic, REST API, background jobs
   src/backend/
-    domain/  # pure business rules (average price, rebalancing, indicators, corporate actions...)
-    api/     # FastAPI app and routes
+    domain/          # pure business rules (average price, rebalancing, indicators, corporate actions...)
+    application/     # use cases (recalculation, B3 import, snapshots, catch-up)
+    ports/           # interfaces the infrastructure implements
+    infrastructure/  # Postgres, brapi.dev, B3 parser, scheduled jobs
+    api/             # FastAPI app, routes and the WebSocket channel
+  migrations/        # Alembic
   tests/
 frontend/    # Tauri + React + Vite — desktop app
+  src/         # React UI (dashboard, login)
+  src-tauri/   # native Rust shell (capabilities, per-OS build)
+  e2e/         # Playwright
 docs/
   architecture.md
   business-rules.md
@@ -50,9 +57,18 @@ cd backend && uv run pytest                # everything
 ## Running locally
 
 ```bash
-# backend
+# backend (http://localhost:8000, interactive docs at /docs)
 cd backend && uv run uvicorn backend.api.app:app --reload
+```
 
-# desktop app (needs Rust installed)
+```bash
+# app in the browser — fastest loop, no Rust needed (http://localhost:1420)
+cd frontend && npm install && npm run dev
+```
+
+```bash
+# native desktop window (needs Rust + Cargo installed)
 cd frontend && npm run tauri dev
 ```
+
+See [frontend/README.md](frontend/README.md) for the API client generation and E2E tests.

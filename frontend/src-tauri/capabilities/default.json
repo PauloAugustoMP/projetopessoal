@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Minimum capabilities the app needs (docs/architecture.md §5): file dialogs for the B3 statement import and data export. Network access is constrained by the CSP in tauri.conf.json, not by a permission — the webview only ever talks to the local API.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "dialog:allow-save"
+  ]
+}
